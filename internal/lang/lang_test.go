@@ -116,3 +116,19 @@ func TestRootCanBeAssignedDirectly(t *testing.T) {
 		t.Fatalf("compound root=%#v", r)
 	}
 }
+
+func TestTopLevelObjectLiteralIsAnExpression(t *testing.T) {
+	root, last := run(t, `{age: 18}`, nil)
+	if root != nil {
+		t.Fatalf("root=%#v, want nil", root)
+	}
+	want := map[string]any{"age": float64(18)}
+	if !reflect.DeepEqual(last, want) {
+		t.Fatalf("last=%#v, want %#v", last, want)
+	}
+
+	_, empty := run(t, `{}`, nil)
+	if !reflect.DeepEqual(empty, map[string]any{}) {
+		t.Fatalf("empty object=%#v", empty)
+	}
+}

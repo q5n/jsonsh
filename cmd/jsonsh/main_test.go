@@ -77,6 +77,16 @@ func TestNullInputInitializesRootWithoutReading(t *testing.T) {
 	}
 }
 
+func TestNullInputCanReturnObjectLiteral(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-n", "-r", "-e", `{age:18}`}, failingReader{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "{\n  \"age\": 18\n}\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestNullInputRejectsInputFileAndInPlace(t *testing.T) {
 	for _, args := range [][]string{
 		{"-n", "-e", `$`, "input.json"},

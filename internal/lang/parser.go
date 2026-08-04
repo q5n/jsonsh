@@ -56,7 +56,17 @@ func (p *parser) stmt() (Stmt, error) {
 	t := p.peek()
 	switch t.kind {
 	case tLBrace:
-		return p.block()
+		if !p.startsObjectLiteral() {
+			return p.block()
+		}
+		x, e := p.expression()
+		if e != nil {
+			return nil, e
+		}
+		if e := p.endStmt(); e != nil {
+			return nil, e
+		}
+		return &ExprStmt{t.pos, x}, nil
 	case tIf:
 		return p.ifStmt()
 	case tFor:
@@ -103,6 +113,20 @@ func (p *parser) stmt() (Stmt, error) {
 		return &ExprStmt{t.pos, x}, nil
 	}
 }
+
+func (p *parser) startsObjectLiteral() bool {
+	if p.peek().kind != tLBrace || p.i+1 >= len(p.ts) {
+		return false
+	}
+	next := p.ts[p.i+1].kind
+	if next == tRBrace {
+		return true
+	}
+	return p.i+2 < len(p.ts) &&
+		(next == tIdent || next == tString) &&
+		p.ts[p.i+2].kind == tColon
+}
+
 func (p *parser) endStmt() error {
 	if p.match(tSemi) || p.peek().kind == tRBrace || p.peek().kind == tEOF {
 		return nil
