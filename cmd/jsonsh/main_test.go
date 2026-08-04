@@ -38,7 +38,8 @@ func TestHelp(t *testing.T) {
 		if err := run([]string{option}, strings.NewReader(""), &out); err != nil {
 			t.Fatalf("%s returned error: %v", option, err)
 		}
-		if !strings.Contains(out.String(), "用法:") ||
+		if !strings.Contains(out.String(), "jsonsh "+version+" -") ||
+			!strings.Contains(out.String(), "Usage:") ||
 			!strings.Contains(out.String(), "--max-steps") ||
 			!strings.Contains(out.String(), "--version") ||
 			!strings.Contains(out.String(), "--pretty") ||
@@ -50,6 +51,17 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "array.push(value, ...)") {
 			t.Fatalf("%s returned incomplete help: %q", option, out.String())
 		}
+	}
+}
+
+func TestNoArgumentsShowsHelp(t *testing.T) {
+	var out bytes.Buffer
+	if err := run(nil, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), "jsonsh "+version+" -") ||
+		!strings.Contains(out.String(), "Usage:") {
+		t.Fatalf("run returned incomplete help: %q", out.String())
 	}
 }
 

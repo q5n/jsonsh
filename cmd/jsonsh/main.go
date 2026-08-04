@@ -33,54 +33,56 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("jsonsh", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
-		fmt.Fprintln(stdout, `jsonsh - 使用类 JavaScript 表达式处理 JSON/JSONC
+		fmt.Fprintf(stdout, `jsonsh %s - process JSON/JSONC with JavaScript-like expressions
 
-用法:
-  jsonsh (-e CODE | -f SCRIPT) [选项] [INPUT]
+Usage:
+  jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
 
-INPUT 省略时从标准输入读取。支持 //、/* ... */ 注释和尾随逗号。
-默认仅替换发生变化的内容，并保留原格式与注释。
+If INPUT is omitted, input is read from standard input. Line comments,
+block comments, and trailing commas are supported. By default, only changed
+values are replaced, preserving the original formatting and comments.
 
-脚本:
-  -e, --expression CODE  执行指定代码
-  -f, --script FILE      从 UTF-8 文件读取代码
+Scripts:
+  -e, --expression CODE  Execute the specified code
+  -f, --script FILE      Read code from a UTF-8 file
 
-根变量:
-  $                       当前 JSON 根值
-  $ = value               直接替换整个 JSON 根值
+Root variable:
+  $                       Current JSON root value
+  $ = value               Replace the entire JSON root value
 
-输出:
-  -r, --result           输出最后一个表达式的值（默认输出修改后的 $）
-  -p, --pretty           重新美化输出并保留注释
-  -c, --compact          输出紧凑的标准 JSON（移除注释）
-  -o, --output FILE      写入指定文件
-  -i, --in-place         安全替换输入文件
+Output:
+  -r, --result            Print the last expression result (default: modified $)
+  -p, --pretty            Pretty-print output while preserving comments
+  -c, --compact           Print compact standard JSON without comments
+  -o, --output FILE       Write output to a file
+  -i, --in-place          Safely replace the input file
 
-内置函数:
-  length(value)          返回数组元素数、对象属性数或字符串字符数
-  has(value, item)       检查数组元素、对象属性或字符串子串是否存在
-  keys(value)            返回对象的有序属性名或数组的数字索引
+Built-in functions:
+  length(value)           Return the length of an array, object, or string
+  has(value, item)        Check for an array item, object key, or substring
+  keys(value)             Return ordered object keys or numeric array indexes
 
-内置函数示例:
+Built-in function examples:
   length($.users)
   has($.tags, "go")
   keys($.user)
 
-数组方法:
-  array.push(value, ...)  向数组末尾添加一个或多个值，并返回新长度
+Array methods:
+  array.push(value, ...)  Append values to an array and return its new length
 
-数组方法示例:
+Array method example:
   $.users.push({name: "Tom"})
 
-其他:
-      --max-steps N      最大执行步数（默认 1000000）
-  -v, --version          显示版本号
-  -h, -help, --help      显示帮助
+Other:
+      --max-steps N       Maximum execution steps (default: 1000000)
+  -v, --version           Show version
+  -h, -help, --help       Show help
 
-示例:
+Examples:
   jsonsh -e "$.price *= 0.8" input.json
   jsonsh -e "length($.users)" -r input.json
-  jsonsh -f update.js -i input.json`)
+  jsonsh -f update.js -i input.json
+`, version)
 	}
 	fs.StringVar(&o.expr, "e", "", "script expression")
 	fs.StringVar(&o.expr, "expression", "", "script expression")
@@ -104,6 +106,10 @@ INPUT 省略时从标准输入读取。支持 //、/* ... */ 注释和尾随逗�
 			return nil
 		}
 		return err
+	}
+	if len(args) == 0 {
+		fs.Usage()
+		return nil
 	}
 	if o.showVersion {
 		_, err := fmt.Fprintf(stdout, "jsonsh %s\n", version)
