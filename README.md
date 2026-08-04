@@ -58,6 +58,6 @@ To display the built-in scripting language reference:
 ```
 
 The version is injected at build time. `build.sh` derives it from Git by default,
-or accepts an explicit value with `--version v1.2.3`.
+or accepts an explicit value with `--version v0.2.1`.
 
 See [docs/spec.md](docs/spec.md) for the complete language semantics, built-in functions, and command-line options.
