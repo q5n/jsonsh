@@ -22,7 +22,13 @@ esac
 
 lastVerTag=`git tag -l --sort=v:refname |grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$"|tail -1`
 
-IFS=. read -r major minor patch <<< "${lastVerTag#v}"
+if [ -z "$lastVerTag" ];then
+   patch=0
+   minor=0
+   major=0
+else
+    IFS=. read -r major minor patch <<< "${lastVerTag#v}"
+fi
 
 if [ $patchAdd -eq 1 ]; then
    let patch+=1
