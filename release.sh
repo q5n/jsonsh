@@ -23,9 +23,7 @@ esac
 lastVerTag=`git tag -l --sort=v:refname |grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$"|tail -1`
 
 if [ -z "$lastVerTag" ];then
-   patch=0
-   minor=0
-   major=0
+   patch=0  minor=0  major=0
 else
     IFS=. read -r major minor patch <<< "${lastVerTag#v}"
 fi
@@ -48,7 +46,6 @@ nextVer="${major}.${minor}.${patch}"
 nextVerTag="v$nextVer"
 
 echo "nextVerTag: $nextVerTag"
-sed -Ei 's/^(version\s*=\s*[^0-9]+)[0-9]+\.[0-9]+.[0-9]+([^0-9]+)$/\1'${nextVer}'\2/' Cargo.toml
 git add -A
 git commit -m "release $nextVerTag"
 
