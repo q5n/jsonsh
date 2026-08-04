@@ -30,10 +30,13 @@ go build ./cmd/jsonsh
 go test ./...
 ```
 
-On Windows, you can also double-click `build.bat` in the project root. The script runs the test suite and builds `dist\jsonsh.exe`. To skip the tests from a terminal, run:
+On Linux Bash or Windows Git Bash/MSYS, use the build script. It runs the test
+suite and builds for the current Go target. The output is `dist/jsonsh` on Linux
+or `dist/jsonsh.exe` on Windows:
 
-```powershell
-.\build.ps1 -SkipTests
+```bash
+bash ./build.sh
+bash ./build.sh --skip-tests
 ```
 
 To view the complete command-line help:
@@ -48,7 +51,13 @@ To display the build version:
 .\dist\jsonsh.exe -v
 ```
 
-The version is injected at build time. `build.ps1` derives it from Git by default,
-or accepts an explicit value with `-Version v1.2.3`.
+To display the built-in scripting language reference:
+
+```powershell
+.\dist\jsonsh.exe --language-help
+```
+
+The version is injected at build time. `build.sh` derives it from Git by default,
+or accepts an explicit value with `--version v1.2.3`.
 
 See [docs/spec.md](docs/spec.md) for the complete language semantics, built-in functions, and command-line options.

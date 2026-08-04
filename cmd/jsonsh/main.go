@@ -16,7 +16,7 @@ import (
 type options struct {
 	expr, script, output             string
 	result, compact, pretty, inPlace bool
-	showVersion                      bool
+	showVersion, languageHelp        bool
 	maxSteps                         int
 }
 
@@ -57,39 +57,9 @@ Output:
   -o, --output FILE       Write output to a file
   -i, --in-place          Safely replace the input file
 
-Properties:
-  string.length           Number of Unicode characters
-  array.length            Number of array elements
-
-Built-in functions:
-  typeof(value)           Return the value type
-  keys(value)             Return ordered object keys or numeric array indexes
-
-String methods:
-  toLowerCase()           Convert to lowercase
-  toUpperCase()           Convert to uppercase
-  substring(start, end)   Extract part of a string
-  indexOf(text, start)    Find text and return its index, or -1
-  lastIndexOf(text, start) Find the last occurrence, or -1
-  localeCompare(text)     Compare two strings
-  split(pattern, limit)   Split using a Go regular expression
-  match(pattern)          Return the first regular-expression match
-  matchAll(pattern)       Return all regular-expression matches
-  replace(pattern, text)  Replace the first regular-expression match
-  replaceAll(pattern, text) Replace all regular-expression matches
-  trim()                  Remove leading and trailing whitespace
-
-Array methods:
-  push(value, ...)        Append values and return the new length
-  splice(start, count, ...) Remove, replace, or insert elements
-  join(separator)         Join elements into a string
-  indexOf(value, start)   Find an element using deep equality
-  lastIndexOf(value, start) Find the last matching element
-
-All supported values provide toString(). Object values are encoded as compact JSON.
-
 Other:
       --max-steps N       Maximum execution steps (default: 1000000)
+      --language-help      Show the scripting language reference
   -v, --version           Show version
   -h, -help, --help       Show help
 
@@ -115,6 +85,7 @@ Examples:
 	fs.BoolVar(&o.inPlace, "in-place", false, "replace input file")
 	fs.BoolVar(&o.showVersion, "v", false, "show version")
 	fs.BoolVar(&o.showVersion, "version", false, "show version")
+	fs.BoolVar(&o.languageHelp, "language-help", false, "show scripting language reference")
 	fs.IntVar(&o.maxSteps, "max-steps", 1000000, "maximum execution steps")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -129,6 +100,9 @@ Examples:
 	if o.showVersion {
 		_, err := fmt.Fprintf(stdout, "jsonsh %s\n", version)
 		return err
+	}
+	if o.languageHelp {
+		return printLanguageHelp(stdout)
 	}
 	var exprSet, scriptSet bool
 	fs.Visit(func(f *flag.Flag) {
@@ -226,6 +200,104 @@ Examples:
 	_, e = stdout.Write(data)
 	return e
 }
+
+func printLanguageHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `jsonsh %s scripting language reference
+
+Values and literals:
+  null, boolean, number, string, array, object
+  null  true  false  12.5  "text"  'text'  [1, 2]  {name: "Tom"}
+  Strings support common escapes and \uXXXX. Arrays and objects allow trailing commas.
+
+Variables:
+  $                       Current JSON root value
+  $ = value               Replace the entire root value
+  name = value            Create or update a global variable
+  object.name             Access an object property
+  value[key]              Access an object property or array element
+
+Statements:
+  expression;
+  { statements }
+  if (condition) { ... } else if (condition) { ... } else { ... }
+  for (key in object) { ... }
+  for (index in array) { ... }
+  for (value of array) { ... }
+  for (character of string) { ... }
+  delete object.member;
+  break;
+  continue;
+
+  Statements are separated by semicolons. Repeated semicolons and semicolons
+  after blocks are allowed. Control-flow bodies must use braces.
+
+Operators, from lowest to highest precedence:
+  =  +=  -=  *=  /=
+  ||
+  &&
+  ==  !=
+  >  >=  <  <=
+  +  -
+  *  /
+  !  -value
+  member access and method calls
+
+  Assignments are right-associative. Logical operators short-circuit. The +
+  operator adds numbers, or converts both operands with toString() and
+  concatenates them when either operand is a string.
+
+Properties:
+  string.length                 Number of Unicode code points
+  array.length                  Number of array elements
+
+Built-in functions:
+  typeof(value)                 string, array, object, boolean, or number
+  keys(value)                   Ordered object keys or numeric array indexes
+
+String methods:
+  toString()
+  toLowerCase()
+  toUpperCase()
+  substring(start[, end])
+  indexOf(text[, start])
+  lastIndexOf(text[, start])
+  localeCompare(text)
+  trim()
+  split(pattern[, limit])
+  match(pattern)
+  matchAll(pattern)
+  replace(pattern, replacement)
+  replaceAll(pattern, replacement)
+
+  Pattern arguments are strings containing Go regular expressions, not
+  JavaScript /pattern/flags literals. Replacement strings use Go expansion
+  syntax such as $1. match() returns the full match and capture groups, or null;
+  matchAll() returns an array of match arrays.
+
+Array methods:
+  toString()
+  push(value, ...)
+  splice(start[, deleteCount, ...items])
+  join([separator])
+  indexOf(value[, start])
+  lastIndexOf(value[, start])
+
+  Array searches use recursive deep equality. Array and object variables retain
+  reference identity. for..of uses live array iteration, so splice, deletion,
+  and push can affect later iterations.
+
+Type conversion:
+  string, array, object, boolean, number, and null provide toString(). Objects
+  are encoded as compact single-line JSON. typeof(null) returns "object".
+
+Execution limits:
+  --max-steps limits evaluated statements and expressions. Reading an undefined
+  variable, invalid member, incompatible type, or invalid regular expression is
+  a runtime error with a line and column position.
+`, version)
+	return err
+}
+
 func replaceFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	f, e := os.CreateTemp(dir, ".jsonsh-*")

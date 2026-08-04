@@ -69,16 +69,37 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "Usage:") ||
 			!strings.Contains(out.String(), "--max-steps") ||
 			!strings.Contains(out.String(), "--version") ||
+			!strings.Contains(out.String(), "--language-help") ||
 			!strings.Contains(out.String(), "--pretty") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
-			!strings.Contains(out.String(), "string.length") ||
-			!strings.Contains(out.String(), "typeof(value)") ||
-			!strings.Contains(out.String(), "keys(value)") ||
-			!strings.Contains(out.String(), "matchAll(pattern)") ||
-			!strings.Contains(out.String(), "splice(start, count, ...)") ||
-			!strings.Contains(out.String(), "lastIndexOf(value, start)") {
+			!strings.Contains(out.String(), "--language-help") {
 			t.Fatalf("%s returned incomplete help: %q", option, out.String())
+		}
+		for _, hidden := range []string{"Properties:", "Built-in functions:", "String methods:", "Array methods:"} {
+			if strings.Contains(out.String(), hidden) {
+				t.Errorf("%s unexpectedly includes language section %q", option, hidden)
+			}
+		}
+	}
+}
+
+func TestLanguageHelp(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"--language-help"}, strings.NewReader("not JSON"), &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"jsonsh " + version + " scripting language reference",
+		"Values and literals:", "Operators, from lowest", "for (value of array)",
+		"typeof(value)", "string.length", "array.length", "toLowerCase()",
+		"lastIndexOf(text[, start])", "matchAll(pattern)", "replaceAll(pattern, replacement)",
+		"splice(start[, deleteCount, ...items])", "lastIndexOf(value[, start])",
+		"Go regular expressions", "typeof(null)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("language help is missing %q", want)
 		}
 	}
 }
