@@ -42,4 +42,13 @@ To view the complete command-line help:
 .\dist\jsonsh.exe --help
 ```
 
+To display the build version:
+
+```powershell
+.\dist\jsonsh.exe -v
+```
+
+The version is injected at build time. `build.ps1` derives it from Git by default,
+or accepts an explicit value with `-Version v1.2.3`.
+
 See [docs/spec.md](docs/spec.md) for the complete language semantics, built-in functions, and command-line options.

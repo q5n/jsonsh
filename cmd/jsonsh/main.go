@@ -16,8 +16,11 @@ import (
 type options struct {
 	expr, script, output             string
 	result, compact, pretty, inPlace bool
+	showVersion                      bool
 	maxSteps                         int
 }
+
+var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -71,6 +74,7 @@ INPUT 省略时从标准输入读取。支持 //、/* ... */ 注释和尾随逗�
 
 其他:
       --max-steps N      最大执行步数（默认 1000000）
+  -v, --version          显示版本号
   -h, -help, --help      显示帮助
 
 示例:
@@ -92,11 +96,17 @@ INPUT 省略时从标准输入读取。支持 //、/* ... */ 注释和尾随逗�
 	fs.StringVar(&o.output, "output", "", "output file")
 	fs.BoolVar(&o.inPlace, "i", false, "replace input file")
 	fs.BoolVar(&o.inPlace, "in-place", false, "replace input file")
+	fs.BoolVar(&o.showVersion, "v", false, "show version")
+	fs.BoolVar(&o.showVersion, "version", false, "show version")
 	fs.IntVar(&o.maxSteps, "max-steps", 1000000, "maximum execution steps")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
+		return err
+	}
+	if o.showVersion {
+		_, err := fmt.Fprintf(stdout, "jsonsh %s\n", version)
 		return err
 	}
 	if (o.expr == "") == (o.script == "") {

@@ -40,6 +40,7 @@ func TestHelp(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "用法:") ||
 			!strings.Contains(out.String(), "--max-steps") ||
+			!strings.Contains(out.String(), "--version") ||
 			!strings.Contains(out.String(), "--pretty") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
@@ -48,6 +49,22 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "keys(value)") ||
 			!strings.Contains(out.String(), "array.push(value, ...)") {
 			t.Fatalf("%s returned incomplete help: %q", option, out.String())
+		}
+	}
+}
+
+func TestVersion(t *testing.T) {
+	oldVersion := version
+	version = "v1.2.3"
+	t.Cleanup(func() { version = oldVersion })
+
+	for _, option := range []string{"-v", "--version"} {
+		var out bytes.Buffer
+		if err := run([]string{option}, strings.NewReader(""), &out); err != nil {
+			t.Fatalf("%s returned error: %v", option, err)
+		}
+		if got, want := out.String(), "jsonsh v1.2.3\n"; got != want {
+			t.Fatalf("%s returned %q, want %q", option, got, want)
 		}
 	}
 }
