@@ -2,10 +2,10 @@
 
 `jsonsh` is a lightweight JSON/JSONC scripting tool written in pure Go. The root value is available through `$`. It has no third-party dependencies and does not embed or invoke a JavaScript engine. Input files may contain `//` line comments, `/* ... */` block comments, and trailing commas.
 
-```powershell
+```bash
 go run ./cmd/jsonsh -e '$.price *= 0.8' input.json
 go run ./cmd/jsonsh -e '$.users.length' -r input.json
-Get-Content input.json | go run ./cmd/jsonsh -e 'delete $.password'
+cat input.json | go run ./cmd/jsonsh -e 'delete $.password'
 go run ./cmd/jsonsh -n -e '$ = {status: "ok"}'
 ```
 
@@ -16,8 +16,8 @@ from scratch.
 Boolean short options can be grouped. A value-taking short option can appear at
 the end of a group, so the previous example can also be written as:
 
-```powershell
-.\jsonsh.exe -nre "{status: 'ok'}"
+```bash
+jsonsh -nre "{status: 'ok'}"
 ```
 
 By default, `jsonsh` rewrites only values that actually change. Existing indentation, line endings, property order, comments, string escapes, and number formatting remain untouched. Use `--pretty` to reformat the document while preserving comments, or `--compact` to emit compact, comment-free standard JSON.
@@ -37,7 +37,7 @@ $ = {status: "ok", items: []};
 
 ## Build and test
 
-```powershell
+```bash
 go build ./cmd/jsonsh
 go test ./...
 ```
@@ -53,20 +53,20 @@ bash ./build.sh --skip-tests
 
 To view the complete command-line help:
 
-```powershell
-.\dist\jsonsh --help
+```bash
+./dist/jsonsh --help
 ```
 
 To display the build version:
 
-```powershell
-.\dist\jsonsh -v
+```bash
+./dist/jsonsh -v
 ```
 
 To display the built-in scripting language reference:
 
-```powershell
-.\dist\jsonsh --syntax
+```bash
+./dist/jsonsh --syntax
 ```
 
 The version is injected at build time. `build.sh` derives it from Git by default,
