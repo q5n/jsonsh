@@ -32,7 +32,7 @@ go test ./...
 
 On Linux Bash or Windows Git Bash/MSYS, use the build script. It runs the test
 suite and builds for the current Go target. The output is `dist/jsonsh` on Linux
-or `dist/jsonsh.exe` on Windows:
+or `dist/jsonsh` on Windows:
 
 ```bash
 bash ./build.sh
@@ -42,19 +42,19 @@ bash ./build.sh --skip-tests
 To view the complete command-line help:
 
 ```powershell
-.\dist\jsonsh.exe --help
+.\dist\jsonsh --help
 ```
 
 To display the build version:
 
 ```powershell
-.\dist\jsonsh.exe -v
+.\dist\jsonsh -v
 ```
 
 To display the built-in scripting language reference:
 
 ```powershell
-.\dist\jsonsh.exe --language-help
+.\dist\jsonsh --language-help
 ```
 
 The version is injected at build time. `build.sh` derives it from Git by default,
