@@ -109,6 +109,7 @@ func (s *IfStmt) stmtPos() Pos { return s.P }
 type ForStmt struct {
 	P      Pos
 	Name   string
+	Of     bool
 	Source Expr
 	Body   *Block
 }

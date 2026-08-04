@@ -57,21 +57,36 @@ Output:
   -o, --output FILE       Write output to a file
   -i, --in-place          Safely replace the input file
 
+Properties:
+  string.length           Number of Unicode characters
+  array.length            Number of array elements
+
 Built-in functions:
-  length(value)           Return the length of an array, object, or string
-  has(value, item)        Check for an array item, object key, or substring
+  typeof(value)           Return the value type
   keys(value)             Return ordered object keys or numeric array indexes
 
-Built-in function examples:
-  length($.users)
-  has($.tags, "go")
-  keys($.user)
+String methods:
+  toLowerCase()           Convert to lowercase
+  toUpperCase()           Convert to uppercase
+  substring(start, end)   Extract part of a string
+  indexOf(text, start)    Find text and return its index, or -1
+  lastIndexOf(text, start) Find the last occurrence, or -1
+  localeCompare(text)     Compare two strings
+  split(pattern, limit)   Split using a Go regular expression
+  match(pattern)          Return the first regular-expression match
+  matchAll(pattern)       Return all regular-expression matches
+  replace(pattern, text)  Replace the first regular-expression match
+  replaceAll(pattern, text) Replace all regular-expression matches
+  trim()                  Remove leading and trailing whitespace
 
 Array methods:
-  array.push(value, ...)  Append values to an array and return its new length
+  push(value, ...)        Append values and return the new length
+  splice(start, count, ...) Remove, replace, or insert elements
+  join(separator)         Join elements into a string
+  indexOf(value, start)   Find an element using deep equality
+  lastIndexOf(value, start) Find the last matching element
 
-Array method example:
-  $.users.push({name: "Tom"})
+All supported values provide toString(). Object values are encoded as compact JSON.
 
 Other:
       --max-steps N       Maximum execution steps (default: 1000000)
@@ -80,7 +95,7 @@ Other:
 
 Examples:
   jsonsh -e "$.price *= 0.8" input.json
-  jsonsh -e "length($.users)" -r input.json
+  jsonsh -e "$.users.length" -r input.json
   jsonsh -f update.js -i input.json
 `, version)
 	}
@@ -115,7 +130,16 @@ Examples:
 		_, err := fmt.Fprintf(stdout, "jsonsh %s\n", version)
 		return err
 	}
-	if (o.expr == "") == (o.script == "") {
+	var exprSet, scriptSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "e", "expression":
+			exprSet = true
+		case "f", "script":
+			scriptSet = true
+		}
+	})
+	if exprSet == scriptSet {
 		return errors.New("exactly one of -e or -f is required")
 	}
 	if o.output != "" && o.inPlace {
@@ -163,9 +187,12 @@ Examples:
 		return e
 	}
 	root := jsonc.Clone(doc.Root.Value)
-	root, last, e := lang.Execute(code, root, o.maxSteps)
-	if e != nil {
-		return e
+	var last any
+	if code != "" {
+		root, last, e = lang.Execute(code, root, o.maxSteps)
+		if e != nil {
+			return e
+		}
 	}
 	var output string
 	if o.result {

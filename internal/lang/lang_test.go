@@ -22,8 +22,8 @@ func TestLiteralsOperatorsAndBuiltins(t *testing.T) {
 		$.math = 1 + 2 * 3;
 		$.logic = 0 || (2 > 1 && !false);
 		$.array = [1, {name: "x"}, true, null,];
-		$.len = length("中文a");
-		$.has = has($.text, "lang");
+		$.len = "中文a".length;
+		$.has = $.text.indexOf("lang") >= 0;
 		$.keys = keys({b: 1, a: 2});
 	`, root)
 	want := map[string]any{"text": "golang", "math": float64(7), "logic": true, "array": []any{float64(1), map[string]any{"name": "x"}, true, nil}, "len": float64(3), "has": true, "keys": []any{"a", "b"}}
@@ -42,7 +42,7 @@ func TestControlFlowMutationAndDelete(t *testing.T) {
 		total = 0;
 		for (i in $.users) {
 			u = $.users[i];
-			if (has(u.tags, "blocked")) { delete u.secret; continue; }
+			if (u.tags[0] == "blocked") { delete u.secret; continue; }
 			total += u.score;
 			if (total > 100) { break; }
 		}
@@ -63,7 +63,7 @@ func TestShortCircuitAndErrors(t *testing.T) {
 	_, _ = run(t, `x = false && missing.value; y = true || missing.value;`, map[string]any{})
 	cases := []struct{ code, contains string }{
 		{`x = 1 / 0;`, "division by zero"},
-		{`x = "1" + 2;`, "operands"},
+		{`x = true - 1;`, "incompatible operand types"},
 		{`x = $.missing;`, "does not exist"},
 		{`break;`, "outside loop"},
 		{`x = 1 y = 2;`, "expected ';'"},

@@ -4,7 +4,7 @@
 
 ```powershell
 go run ./cmd/jsonsh -e '$.price *= 0.8' input.json
-go run ./cmd/jsonsh -e 'length($.users)' -r input.json
+go run ./cmd/jsonsh -e '$.users.length' -r input.json
 Get-Content input.json | go run ./cmd/jsonsh -e 'delete $.password'
 ```
 

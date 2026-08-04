@@ -18,6 +18,9 @@ func Parse(src string) (*Program, error) {
 	p := &parser{ts: ts}
 	var list []Stmt
 	for p.peek().kind != tEOF {
+		if p.match(tSemi) {
+			continue
+		}
 		s, e := p.stmt()
 		if e != nil {
 			return nil, e
@@ -113,6 +116,9 @@ func (p *parser) block() (*Block, error) {
 		if p.peek().kind == tEOF {
 			return nil, p.err(p.peek(), "expected '}'")
 		}
+		if p.match(tSemi) {
+			continue
+		}
 		s, e := p.stmt()
 		if e != nil {
 			return nil, e
@@ -160,8 +166,13 @@ func (p *parser) forStmt() (Stmt, error) {
 	if e != nil {
 		return nil, e
 	}
-	if _, e = p.need(tIn, "expected 'in'"); e != nil {
-		return nil, e
+	of := false
+	if p.match(tIn) {
+		// for..in iterates property keys.
+	} else if p.match(tOf) {
+		of = true
+	} else {
+		return nil, p.err(p.peek(), "expected 'in' or 'of'")
 	}
 	src, e := p.expression()
 	if e != nil {
@@ -176,7 +187,7 @@ func (p *parser) forStmt() (Stmt, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &ForStmt{t.pos, n.lit, src, b}, nil
+	return &ForStmt{P: t.pos, Name: n.lit, Of: of, Source: src, Body: b}, nil
 }
 
 var prec = map[tokenKind]int{tAssign: 1, tPlusAssign: 1, tMinusAssign: 1, tStarAssign: 1, tSlashAssign: 1, tOr: 2, tAnd: 3, tEq: 4, tNe: 4, tGT: 5, tGE: 5, tLT: 5, tLE: 5, tPlus: 6, tMinus: 6, tStar: 7, tSlash: 7}

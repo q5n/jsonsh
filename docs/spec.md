@@ -6,7 +6,7 @@
 
 ## Data types and variables
 
-The runtime supports only `null`, `boolean`, `number` (`float64`), `string`, `array`, and `object`. There are no implicit type conversions. Assigning to a regular identifier for the first time creates a global variable; reading an undefined variable is an error. There is no block scope. `$` is the predefined root variable. Its members can be modified, and `$ = value` can replace the entire root value. Deleting `$` remains prohibited.
+The runtime supports only `null`, `boolean`, `number` (`float64`), `string`, `array`, and `object`. There are no implicit type conversions except string concatenation with `+`, which converts both operands using the language's `toString()` rules. Assigning to a regular identifier for the first time creates a global variable; reading an undefined variable is an error. There is no block scope. `$` is the predefined root variable. Its members can be modified, and `$ = value` can replace the entire root value. Deleting `$` remains prohibited.
 
 Literals include single- and double-quoted strings, JSON-format numbers, booleans, null, arrays, and objects. Object keys may be strings or identifiers, and script literals may contain trailing commas. Strings support common escape sequences and `\uXXXX`. Scripts support `//` and `/* ... */` comments.
 
@@ -30,20 +30,27 @@ Statements are separated by semicolons. The final semicolon in a block, or immed
 if (condition) { ... } else if (condition) { ... } else { ... }
 for (key in object) { ... }
 for (index in array) { ... }
+for (value of array) { ... }
+for (character of string) { ... }
 delete object.member;
 break;
 continue;
 ```
 
-`for..in` iterates over numeric array indexes or object keys in lexicographic order. A key snapshot is created when the loop starts, and members deleted before their turn are skipped. Loop variables live in global scope. `break` and `continue` apply only to the nearest enclosing loop and are errors outside a loop. Deleting an array element shifts subsequent elements toward the beginning. Deleting a missing member is an error. Regular variables and `$` cannot be deleted.
+`for..in` iterates over numeric array indexes or object keys in lexicographic order. A key snapshot is created when the loop starts, and members deleted before their turn are skipped. `for..of` iterates over array values or Unicode code points in a string. Its source expression is evaluated once. Array iteration is live: each iteration reads the current length and current element, so `splice`, deletion, and `push` affect later iterations. Loop variables live in global scope. `break` and `continue` apply only to the nearest enclosing loop and are errors outside a loop. Deleting an array element shifts subsequent elements toward the beginning. Deleting a missing member is an error. Regular variables and `$` cannot be deleted. Empty statements are allowed, including repeated semicolons and semicolons following blocks.
 
 ## Built-in functions and methods
 
-- `length(v)` returns the number of array elements, object properties, or Unicode characters in a string.
-- `has(container, value)` searches an array using deep equality, checks an object for a string key, or checks a string for a substring.
+- Strings and arrays provide a read-only `length` property. String length counts Unicode code points.
+- Strings provide `toLowerCase()`, `toUpperCase()`, `substring(start[, end])`, `indexOf(text[, start])`, `lastIndexOf(text[, start])`, `localeCompare(text)`, `split(pattern[, limit])`, `match(pattern)`, `matchAll(pattern)`, `replace(pattern, replacement)`, `replaceAll(pattern, replacement)`, and `trim()`. Pattern arguments use Go regular-expression syntax, not JavaScript regex literals. `match` returns the full first match followed by its capture groups, or `null`; `matchAll` returns an array of those match arrays. Replacement strings use Go expansion syntax such as `$1`.
+- Arrays provide `push(value, ...)`, `splice(start[, deleteCount, ...items])`, `join([separator])`, `indexOf(value[, start])`, and `lastIndexOf(value[, start])`. Array searches use the language's recursive deep equality.
+- `typeof(v)` returns `string`, `array`, `object`, `boolean`, or `number`. Like JavaScript, `typeof(null)` returns `object`.
 - `keys(v)` returns object keys in lexicographic order or numeric array indexes.
+- Every supported value provides `toString()`. Objects are encoded as compact, single-line JSON. Array string conversion uses comma-separated element values.
 
-Arrays provide the built-in method `array.push(value, ...)`. It accepts one or more arguments, appends them in order, mutates the array in place, and returns the new length. Mutations are visible through every variable referencing the same array. Calling it without arguments, calling it on a non-array receiver, or calling an unknown method is a runtime error.
+`+` adds two numbers. If either operand is a string, both operands are converted using the same rules as `toString()` and concatenated.
+
+Array mutations are visible through every variable referencing the same array. Calling a method with an invalid argument count or type, calling an array method on a non-array receiver, or calling an unknown method is a runtime error.
 
 Invalid argument counts or types are runtime errors.
 
@@ -64,4 +71,4 @@ jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
 
 When `INPUT` is omitted, input is read from standard input. `-e` and `-f`, `-o` and `-i`, and `-p` and `-c` are mutually exclusive. `-i` requires an input file. The default mode applies minimal changes and preserves the original source structure. `--pretty` reformats while retaining comments. `--compact` emits comment-free standard JSON. In-place writes first create a temporary file in the same directory and replace the input only after the output has been written and closed successfully. See [jsonc-preserve.md](jsonc-preserve.md) for details.
 
-Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. Function definitions, conversions, `return`, `while`, traditional `for`, increment operators, modulo, ternary expressions, slicing, and JavaScript standard objects are not supported yet.
+Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. An explicitly empty expression (`-e ""`) performs no mutations and outputs the root value in the selected output mode. Function definitions, `return`, `while`, traditional `for`, increment operators, modulo, ternary expressions, slicing, and JavaScript standard objects are not supported yet.

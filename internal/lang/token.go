@@ -29,6 +29,7 @@ const (
 	tElse
 	tFor
 	tIn
+	tOf
 	tDelete
 	tBreak
 	tContinue

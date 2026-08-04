@@ -17,10 +17,37 @@ func TestRunMutationAndResult(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	out.Reset()
-	if err := run([]string{"-e", `length($.items)`, "-r", "-c"}, strings.NewReader(`{"items":[1,2]}`), &out); err != nil {
+	if err := run([]string{"-e", `$.items.length`, "-r", "-c"}, strings.NewReader(`{"items":[1,2]}`), &out); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := out.String(), "2\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestRunEmptyExpressionDoesNothing(t *testing.T) {
+	src := "{\n  // keep this comment\n  \"items\": [1, 2],\n}\n"
+	var out bytes.Buffer
+	if err := run([]string{"-e", ""}, strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != src {
+		t.Fatalf("got %q want %q", got, src)
+	}
+
+	out.Reset()
+	if err := run([]string{"--expression", "", "--compact"}, strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "{\"items\":[1,2]}\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	out.Reset()
+	if err := run([]string{"-e", "", "--result", "--compact"}, strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "null\n"; got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
@@ -45,10 +72,12 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "--pretty") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
-			!strings.Contains(out.String(), "length(value)") ||
-			!strings.Contains(out.String(), "has(value, item)") ||
+			!strings.Contains(out.String(), "string.length") ||
+			!strings.Contains(out.String(), "typeof(value)") ||
 			!strings.Contains(out.String(), "keys(value)") ||
-			!strings.Contains(out.String(), "array.push(value, ...)") {
+			!strings.Contains(out.String(), "matchAll(pattern)") ||
+			!strings.Contains(out.String(), "splice(start, count, ...)") ||
+			!strings.Contains(out.String(), "lastIndexOf(value, start)") {
 			t.Fatalf("%s returned incomplete help: %q", option, out.String())
 		}
 	}

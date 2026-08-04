@@ -116,7 +116,7 @@ func (l *lexer) ident() token {
 		l.advance()
 	}
 	s := l.src[start:l.off]
-	kws := map[string]tokenKind{"true": tTrue, "false": tFalse, "null": tNull, "if": tIf, "else": tElse, "for": tFor, "in": tIn, "delete": tDelete, "break": tBreak, "continue": tContinue}
+	kws := map[string]tokenKind{"true": tTrue, "false": tFalse, "null": tNull, "if": tIf, "else": tElse, "for": tFor, "in": tIn, "of": tOf, "delete": tDelete, "break": tBreak, "continue": tContinue}
 	if k, ok := kws[s]; ok {
 		return token{k, s, p}
 	}

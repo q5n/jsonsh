@@ -49,3 +49,4 @@ Write-Host ''
 Write-Host 'Build succeeded:' -ForegroundColor Green
 Write-Host $outputFile
 Write-Host "Version: $Version"
+sleep 2
