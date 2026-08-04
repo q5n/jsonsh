@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -52,6 +53,42 @@ func TestRunEmptyExpressionDoesNothing(t *testing.T) {
 	}
 }
 
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("input should not be read")
+}
+
+func TestNullInputInitializesRootWithoutReading(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-n", "-e", `$ = {ready: true}`, "-c"}, failingReader{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "{\"ready\":true}\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	out.Reset()
+	if err := run([]string{"--null-input", "-e", `$`, "-r", "-c"}, failingReader{}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "null\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestNullInputRejectsInputFileAndInPlace(t *testing.T) {
+	for _, args := range [][]string{
+		{"-n", "-e", `$`, "input.json"},
+		{"-n", "-e", `$`, "-i"},
+	} {
+		err := run(args, failingReader{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "null-input cannot be used") {
+			t.Fatalf("run(%v) error = %v", args, err)
+		}
+	}
+}
+
 func TestRunRejectsTrailingJSON(t *testing.T) {
 	err := run([]string{"-e", "x=1"}, strings.NewReader(`{} {}`), &bytes.Buffer{})
 	if err == nil {
@@ -71,6 +108,7 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "--version") ||
 			!strings.Contains(out.String(), "--language-help") ||
 			!strings.Contains(out.String(), "--pretty") ||
+			!strings.Contains(out.String(), "--null-input") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
 			!strings.Contains(out.String(), "--language-help") {

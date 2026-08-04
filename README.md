@@ -6,7 +6,12 @@
 go run ./cmd/jsonsh -e '$.price *= 0.8' input.json
 go run ./cmd/jsonsh -e '$.users.length' -r input.json
 Get-Content input.json | go run ./cmd/jsonsh -e 'delete $.password'
+go run ./cmd/jsonsh -n -e '$ = {status: "ok"}'
 ```
+
+Use `-n` or `--null-input` to skip standard input and input files and initialize
+the root value `$` to `null`. This is useful when a script creates its root value
+from scratch.
 
 By default, `jsonsh` rewrites only values that actually change. Existing indentation, line endings, property order, comments, string escapes, and number formatting remain untouched. Use `--pretty` to reformat the document while preserving comments, or `--compact` to emit compact, comment-free standard JSON.
 

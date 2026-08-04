@@ -17,6 +17,7 @@ type options struct {
 	expr, script, output             string
 	result, compact, pretty, inPlace bool
 	showVersion, languageHelp        bool
+	nullInput                        bool
 	maxSteps                         int
 }
 
@@ -40,7 +41,8 @@ Usage:
 
 If INPUT is omitted, input is read from standard input. Line comments,
 block comments, and trailing commas are supported. By default, only changed
-values are replaced, preserving the original formatting and comments.
+values are replaced, preserving the original formatting and comments. Use
+-n/--null-input to skip input entirely and initialize $ to null.
 
 Scripts:
   -e, --expression CODE  Execute the specified code
@@ -56,6 +58,7 @@ Output:
   -c, --compact           Print compact standard JSON without comments
   -o, --output FILE       Write output to a file
   -i, --in-place          Safely replace the input file
+  -n, --null-input        Do not read input; initialize $ to null
 
 Other:
       --max-steps N       Maximum execution steps (default: 1000000)
@@ -83,6 +86,8 @@ Examples:
 	fs.StringVar(&o.output, "output", "", "output file")
 	fs.BoolVar(&o.inPlace, "i", false, "replace input file")
 	fs.BoolVar(&o.inPlace, "in-place", false, "replace input file")
+	fs.BoolVar(&o.nullInput, "n", false, "initialize root to null without reading input")
+	fs.BoolVar(&o.nullInput, "null-input", false, "initialize root to null without reading input")
 	fs.BoolVar(&o.showVersion, "v", false, "show version")
 	fs.BoolVar(&o.showVersion, "version", false, "show version")
 	fs.BoolVar(&o.languageHelp, "language-help", false, "show scripting language reference")
@@ -125,6 +130,12 @@ Examples:
 	if fs.NArg() > 1 {
 		return errors.New("only one input file is supported")
 	}
+	if o.nullInput && fs.NArg() != 0 {
+		return errors.New("-n/--null-input cannot be used with an input file")
+	}
+	if o.nullInput && o.inPlace {
+		return errors.New("-n/--null-input cannot be used with -i/--in-place")
+	}
 	input := ""
 	if fs.NArg() == 1 {
 		input = fs.Arg(0)
@@ -143,18 +154,24 @@ Examples:
 		}
 		code = string(b)
 	}
-	var rd io.Reader = stdin
-	if input != "" {
-		f, e := os.Open(input)
-		if e != nil {
-			return fmt.Errorf("open input: %w", e)
+	var raw []byte
+	if o.nullInput {
+		raw = []byte("null")
+	} else {
+		var rd io.Reader = stdin
+		if input != "" {
+			f, e := os.Open(input)
+			if e != nil {
+				return fmt.Errorf("open input: %w", e)
+			}
+			defer f.Close()
+			rd = f
 		}
-		defer f.Close()
-		rd = f
-	}
-	raw, e := io.ReadAll(rd)
-	if e != nil {
-		return fmt.Errorf("read input: %w", e)
+		var e error
+		raw, e = io.ReadAll(rd)
+		if e != nil {
+			return fmt.Errorf("read input: %w", e)
+		}
 	}
 	doc, e := jsonc.Parse(string(raw))
 	if e != nil {
