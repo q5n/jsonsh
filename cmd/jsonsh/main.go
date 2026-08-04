@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"jsonsh/internal/jsonc"
 	"jsonsh/internal/lang"
@@ -16,7 +17,7 @@ import (
 type options struct {
 	expr, script, output             string
 	result, compact, pretty, inPlace bool
-	showVersion, languageHelp        bool
+	showVersion, syntaxHelp          bool
 	nullInput                        bool
 	maxSteps                         int
 }
@@ -31,6 +32,7 @@ func main() {
 }
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	var o options
+	args = expandShortOptions(args)
 	fs := flag.NewFlagSet("jsonsh", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
@@ -38,6 +40,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 
 Usage:
   jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
+
+Boolean short options may be grouped. A value-taking option may appear last:
+  jsonsh -nre "{age: 18}"
 
 If INPUT is omitted, input is read from standard input. Line comments,
 block comments, and trailing commas are supported. By default, only changed
@@ -62,7 +67,7 @@ Output:
 
 Other:
       --max-steps N       Maximum execution steps (default: 1000000)
-      --language-help      Show the scripting language reference
+      --syntax             Show the scripting language reference
   -v, --version           Show version
   -h, -help, --help       Show help
 
@@ -90,7 +95,7 @@ Examples:
 	fs.BoolVar(&o.nullInput, "null-input", false, "initialize root to null without reading input")
 	fs.BoolVar(&o.showVersion, "v", false, "show version")
 	fs.BoolVar(&o.showVersion, "version", false, "show version")
-	fs.BoolVar(&o.languageHelp, "language-help", false, "show scripting language reference")
+	fs.BoolVar(&o.syntaxHelp, "syntax", false, "show scripting language reference")
 	fs.IntVar(&o.maxSteps, "max-steps", 1000000, "maximum execution steps")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -106,7 +111,7 @@ Examples:
 		_, err := fmt.Fprintf(stdout, "jsonsh %s\n", version)
 		return err
 	}
-	if o.languageHelp {
+	if o.syntaxHelp {
 		return printLanguageHelp(stdout)
 	}
 	var exprSet, scriptSet bool
@@ -216,6 +221,78 @@ Examples:
 	}
 	_, e = stdout.Write(data)
 	return e
+}
+
+func expandShortOptions(args []string) []string {
+	booleanOptions := map[byte]bool{
+		'c': true, 'h': true, 'i': true, 'n': true,
+		'p': true, 'r': true, 'v': true,
+	}
+	valueOptions := map[byte]bool{'e': true, 'f': true, 'o': true}
+	singleDashLongOptions := map[string]bool{
+		"-compact": true, "-expression": true, "-help": true,
+		"-in-place": true, "-max-steps": true, "-null-input": true,
+		"-output": true, "-pretty": true, "-result": true,
+		"-script": true, "-syntax": true, "-version": true,
+	}
+	longValueOptions := map[string]bool{
+		"-expression": true, "-max-steps": true, "-output": true, "-script": true,
+		"--expression": true, "--max-steps": true, "--output": true, "--script": true,
+	}
+
+	expanded := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || arg == "-" || !strings.HasPrefix(arg, "-") {
+			expanded = append(expanded, args[i:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "--") || singleDashLongOptions[arg] || strings.Contains(arg, "=") {
+			expanded = append(expanded, arg)
+			if longValueOptions[arg] && i+1 < len(args) {
+				i++
+				expanded = append(expanded, args[i])
+			}
+			continue
+		}
+		if len(arg) <= 2 {
+			expanded = append(expanded, arg)
+			if len(arg) == 2 && valueOptions[arg[1]] && i+1 < len(args) {
+				i++
+				expanded = append(expanded, args[i])
+			}
+			continue
+		}
+
+		cluster := arg[1:]
+		clusterExpansion := make([]string, 0, len(cluster))
+		valid := true
+		for j := 0; j < len(cluster); j++ {
+			option := cluster[j]
+			if booleanOptions[option] {
+				clusterExpansion = append(clusterExpansion, "-"+string(option))
+				continue
+			}
+			if valueOptions[option] {
+				clusterExpansion = append(clusterExpansion, "-"+string(option))
+				if j+1 < len(cluster) {
+					clusterExpansion = append(clusterExpansion, cluster[j+1:])
+				} else if i+1 < len(args) {
+					i++
+					clusterExpansion = append(clusterExpansion, args[i])
+				}
+				break
+			}
+			valid = false
+			break
+		}
+		if valid {
+			expanded = append(expanded, clusterExpansion...)
+		} else {
+			expanded = append(expanded, arg)
+		}
+	}
+	return expanded
 }
 
 func printLanguageHelp(w io.Writer) error {

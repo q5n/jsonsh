@@ -87,6 +87,37 @@ func TestNullInputCanReturnObjectLiteral(t *testing.T) {
 	}
 }
 
+func TestCombinedShortOptions(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-nre", `{age:18}`}, "{\n  \"age\": 18\n}\n"},
+		{[]string{`-nre{age:18}`}, "{\n  \"age\": 18\n}\n"},
+		{[]string{"-nre", `-1`}, "-1\n"},
+	} {
+		var out bytes.Buffer
+		if err := run(tc.args, failingReader{}, &out); err != nil {
+			t.Fatalf("run(%v) returned error: %v", tc.args, err)
+		}
+		if got := out.String(); got != tc.want {
+			t.Fatalf("run(%v) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestCombinedShortOptionsPreserveSingleDashLongFlags(t *testing.T) {
+	for _, option := range []string{"-h", "-help", "--help"} {
+		var out bytes.Buffer
+		if err := run([]string{option}, failingReader{}, &out); err != nil {
+			t.Fatalf("%s returned error: %v", option, err)
+		}
+		if !strings.Contains(out.String(), "Usage:") {
+			t.Fatalf("%s returned incomplete help", option)
+		}
+	}
+}
+
 func TestNullInputRejectsInputFileAndInPlace(t *testing.T) {
 	for _, args := range [][]string{
 		{"-n", "-e", `$`, "input.json"},
@@ -116,12 +147,12 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "Usage:") ||
 			!strings.Contains(out.String(), "--max-steps") ||
 			!strings.Contains(out.String(), "--version") ||
-			!strings.Contains(out.String(), "--language-help") ||
+			!strings.Contains(out.String(), "--syntax") ||
 			!strings.Contains(out.String(), "--pretty") ||
 			!strings.Contains(out.String(), "--null-input") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
-			!strings.Contains(out.String(), "--language-help") {
+			!strings.Contains(out.String(), "--syntax") {
 			t.Fatalf("%s returned incomplete help: %q", option, out.String())
 		}
 		for _, hidden := range []string{"Properties:", "Built-in functions:", "String methods:", "Array methods:"} {
@@ -134,7 +165,7 @@ func TestHelp(t *testing.T) {
 
 func TestLanguageHelp(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"--language-help"}, strings.NewReader("not JSON"), &out); err != nil {
+	if err := run([]string{"--syntax"}, strings.NewReader("not JSON"), &out); err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
 	text := out.String()

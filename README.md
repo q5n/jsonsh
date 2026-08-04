@@ -13,6 +13,13 @@ Use `-n` or `--null-input` to skip standard input and input files and initialize
 the root value `$` to `null`. This is useful when a script creates its root value
 from scratch.
 
+Boolean short options can be grouped. A value-taking short option can appear at
+the end of a group, so the previous example can also be written as:
+
+```powershell
+.\jsonsh.exe -nre "{status: 'ok'}"
+```
+
 By default, `jsonsh` rewrites only values that actually change. Existing indentation, line endings, property order, comments, string escapes, and number formatting remain untouched. Use `--pretty` to reformat the document while preserving comments, or `--compact` to emit compact, comment-free standard JSON.
 
 Use `push` to append one or more elements to an array. It returns the new array length:
@@ -59,7 +66,7 @@ To display the build version:
 To display the built-in scripting language reference:
 
 ```powershell
-.\dist\jsonsh --language-help
+.\dist\jsonsh --syntax
 ```
 
 The version is injected at build time. `build.sh` derives it from Git by default,
