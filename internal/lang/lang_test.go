@@ -64,7 +64,6 @@ func TestShortCircuitAndErrors(t *testing.T) {
 	cases := []struct{ code, contains string }{
 		{`x = 1 / 0;`, "division by zero"},
 		{`x = true - 1;`, "incompatible operand types"},
-		{`x = $.missing;`, "does not exist"},
 		{`break;`, "outside loop"},
 		{`x = 1 y = 2;`, "expected ';'"},
 	}
@@ -73,6 +72,23 @@ func TestShortCircuitAndErrors(t *testing.T) {
 		if e == nil || !strings.Contains(e.Error(), tc.contains) {
 			t.Errorf("%q error=%v", tc.code, e)
 		}
+	}
+}
+
+func TestMissingObjectPropertyReturnsNull(t *testing.T) {
+	root, last := run(t, `
+		$.dot = $.missing;
+		$.bracket = $["alsoMissing"];
+		$.compound = {};
+		$.compound.value += "suffix";
+		$.dot;
+	`, map[string]any{})
+	want := map[string]any{
+		"dot": nil, "bracket": nil,
+		"compound": map[string]any{"value": "nullsuffix"},
+	}
+	if !reflect.DeepEqual(root, want) || last != nil {
+		t.Fatalf("root=%#v last=%#v, want root=%#v last=nil", root, last, want)
 	}
 }
 

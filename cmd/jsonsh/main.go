@@ -18,7 +18,7 @@ type options struct {
 	expr, script, output             string
 	result, compact, pretty, inPlace bool
 	showVersion, syntaxHelp          bool
-	nullInput                        bool
+	noOutput                         bool
 	maxSteps                         int
 }
 
@@ -42,12 +42,12 @@ Usage:
   jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
 
 Boolean short options may be grouped. A value-taking option may appear last:
-  jsonsh -nre "{age: 18}"
+  jsonsh -re "{age: 18}"
 
-If INPUT is omitted, input is read from standard input. Line comments,
-block comments, and trailing commas are supported. By default, only changed
-values are replaced, preserving the original formatting and comments. Use
--n/--null-input to skip input entirely and initialize $ to null.
+If INPUT is omitted and standard input is redirected or piped, input is read
+from standard input. Otherwise, $ is initialized to null. Line comments, block
+comments, and trailing commas are supported. By default, only changed values
+are replaced, preserving the original formatting and comments.
 
 Scripts:
   -e, --expression CODE  Execute the specified code
@@ -63,7 +63,7 @@ Output:
   -c, --compact           Print compact standard JSON without comments
   -o, --output FILE       Write output to a file
   -i, --in-place          Safely replace the input file
-  -n, --null-input        Do not read input; initialize $ to null
+  -n, --no-output         Suppress final output; log output remains visible
 
 Other:
       --max-steps N       Maximum execution steps (default: 1000000)
@@ -91,8 +91,8 @@ Examples:
 	fs.StringVar(&o.output, "output", "", "output file")
 	fs.BoolVar(&o.inPlace, "i", false, "replace input file")
 	fs.BoolVar(&o.inPlace, "in-place", false, "replace input file")
-	fs.BoolVar(&o.nullInput, "n", false, "initialize root to null without reading input")
-	fs.BoolVar(&o.nullInput, "null-input", false, "initialize root to null without reading input")
+	fs.BoolVar(&o.noOutput, "n", false, "suppress final output without suppressing log")
+	fs.BoolVar(&o.noOutput, "no-output", false, "suppress final output without suppressing log")
 	fs.BoolVar(&o.showVersion, "v", false, "show version")
 	fs.BoolVar(&o.showVersion, "version", false, "show version")
 	fs.BoolVar(&o.syntaxHelp, "syntax", false, "show scripting language reference")
@@ -129,17 +129,14 @@ Examples:
 	if o.output != "" && o.inPlace {
 		return errors.New("-o and -i are mutually exclusive")
 	}
+	if o.noOutput && (o.output != "" || o.inPlace) {
+		return errors.New("-n/--no-output cannot be used with -o/--output or -i/--in-place")
+	}
 	if o.compact && o.pretty {
 		return errors.New("--compact and --pretty are mutually exclusive")
 	}
 	if fs.NArg() > 1 {
 		return errors.New("only one input file is supported")
-	}
-	if o.nullInput && fs.NArg() != 0 {
-		return errors.New("-n/--null-input cannot be used with an input file")
-	}
-	if o.nullInput && o.inPlace {
-		return errors.New("-n/--null-input cannot be used with -i/--in-place")
 	}
 	input := ""
 	if fs.NArg() == 1 {
@@ -160,7 +157,15 @@ Examples:
 		code = string(b)
 	}
 	var raw []byte
-	if o.nullInput {
+	terminalInput := false
+	if input == "" {
+		var statErr error
+		terminalInput, statErr = isTerminalInput(stdin)
+		if statErr != nil {
+			return fmt.Errorf("inspect standard input: %w", statErr)
+		}
+	}
+	if terminalInput {
 		raw = []byte("null")
 	} else {
 		var rd io.Reader = stdin
@@ -185,10 +190,13 @@ Examples:
 	root := jsonc.Clone(doc.Root.Value)
 	var last any
 	if code != "" {
-		root, last, e = lang.Execute(code, root, o.maxSteps)
+		root, last, e = lang.ExecuteWithOutput(code, root, o.maxSteps, stdout)
 		if e != nil {
 			return e
 		}
+	}
+	if o.noOutput {
+		return nil
 	}
 	var output string
 	if o.result {
@@ -225,13 +233,13 @@ Examples:
 
 func expandShortOptions(args []string) []string {
 	booleanOptions := map[byte]bool{
-		'c': true, 'h': true, 'i': true, 'n': true,
-		'p': true, 'r': true, 'v': true,
+		'c': true, 'h': true, 'i': true,
+		'n': true, 'p': true, 'r': true, 'v': true,
 	}
 	valueOptions := map[byte]bool{'e': true, 'f': true, 'o': true}
 	singleDashLongOptions := map[string]bool{
 		"-compact": true, "-expression": true, "-help": true,
-		"-in-place": true, "-max-steps": true, "-null-input": true,
+		"-in-place": true, "-max-steps": true, "-no-output": true,
 		"-output": true, "-pretty": true, "-result": true,
 		"-script": true, "-syntax": true, "-version": true,
 	}
@@ -295,6 +303,25 @@ func expandShortOptions(args []string) []string {
 	return expanded
 }
 
+type terminalInputReporter interface {
+	IsTerminalInput() bool
+}
+
+func isTerminalInput(r io.Reader) (bool, error) {
+	if reporter, ok := r.(terminalInputReporter); ok {
+		return reporter.IsTerminalInput(), nil
+	}
+	f, ok := r.(*os.File)
+	if !ok {
+		return false, nil
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	return info.Mode()&os.ModeCharDevice != 0, nil
+}
+
 func printLanguageHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `jsonsh %s scripting language reference
 
@@ -345,6 +372,8 @@ Properties:
   array.length                  Number of array elements
 
 Built-in functions:
+  log(value, ...)               Print values separated by spaces
+  env(name)                     Read an environment variable, or null if unset
   typeof(value)                 string, array, object, boolean, or number
   keys(value)                   Ordered object keys or numeric array indexes
 
@@ -386,8 +415,9 @@ Type conversion:
 
 Execution limits:
   --max-steps limits evaluated statements and expressions. Reading an undefined
-  variable, invalid member, incompatible type, or invalid regular expression is
-  a runtime error with a line and column position.
+  variable, using an invalid member type, an incompatible type, or an invalid
+  regular expression is a runtime error with a line and column position. Reading
+  a missing object property returns null.
 `, version)
 	return err
 }

@@ -3,7 +3,9 @@ package lang
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"reflect"
 	"regexp"
 	"sort"
@@ -16,6 +18,7 @@ type Runtime struct {
 	Globals         map[string]any
 	MaxSteps, steps int
 	Last            any
+	Output          io.Writer
 }
 
 // arrayValue gives arrays reference identity, matching JavaScript array behavior.
@@ -25,7 +28,7 @@ func NewRuntime(root any, max int) *Runtime {
 	if max <= 0 {
 		max = 1000000
 	}
-	return &Runtime{Globals: map[string]any{"$": importValue(root)}, MaxSteps: max}
+	return &Runtime{Globals: map[string]any{"$": importValue(root)}, MaxSteps: max, Output: io.Discard}
 }
 func (r *Runtime) Root() any { return exportValue(r.Globals["$"]) }
 func (r *Runtime) Run(p *Program) error {
@@ -290,7 +293,7 @@ func (r *Runtime) memberValue(p Pos, obj, key any) (any, error) {
 		}
 		v, ok := x[k]
 		if !ok {
-			return nil, r.fail(p, "object property %q does not exist", k)
+			return nil, nil
 		}
 		return v, nil
 	case *arrayValue:
@@ -463,7 +466,7 @@ func (r *Runtime) memberRef(p Pos, parent *ref, obj, key any) (*ref, error) {
 		return &ref{get: func() (any, error) {
 			v, ok := x[k]
 			if !ok {
-				return nil, r.fail(p, "object property %q does not exist", k)
+				return nil, nil
 			}
 			return v, nil
 		}, set: func(v any) error { x[k] = v; return nil }, del: func() error {
@@ -518,6 +521,28 @@ func (r *Runtime) call(c *Call) (any, error) {
 		args[i] = v
 	}
 	switch c.Name {
+	case "log":
+		parts := make([]string, len(args))
+		for i, arg := range args {
+			parts[i] = valueString(arg)
+		}
+		if _, err := io.WriteString(r.Output, strings.Join(parts, " ")+"\n"); err != nil {
+			return nil, r.fail(c.P, "write log output: %v", err)
+		}
+		return nil, nil
+	case "env":
+		if len(args) != 1 {
+			return nil, r.fail(c.P, "env expects 1 argument")
+		}
+		name, ok := args[0].(string)
+		if !ok {
+			return nil, r.fail(c.P, "env requires a string argument")
+		}
+		value, ok := os.LookupEnv(name)
+		if !ok {
+			return nil, nil
+		}
+		return value, nil
 	case "typeof":
 		if len(args) != 1 {
 			return nil, r.fail(c.P, "typeof expects 1 argument")
@@ -947,11 +972,18 @@ func truth(v any) bool {
 }
 
 func Execute(src string, root any, maxSteps int) (any, any, error) {
+	return ExecuteWithOutput(src, root, maxSteps, io.Discard)
+}
+
+func ExecuteWithOutput(src string, root any, maxSteps int, output io.Writer) (any, any, error) {
 	p, e := Parse(src)
 	if e != nil {
 		return nil, nil, e
 	}
 	r := NewRuntime(root, maxSteps)
+	if output != nil {
+		r.Output = output
+	}
 	e = r.Run(p)
 	return r.Root(), exportValue(r.Last), e
 }

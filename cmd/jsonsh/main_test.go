@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -59,9 +60,14 @@ func (failingReader) Read([]byte) (int, error) {
 	return 0, errors.New("input should not be read")
 }
 
+type terminalReader struct{ io.Reader }
+
+func (terminalReader) IsTerminalInput() bool { return true }
+
 func TestNullInputInitializesRootWithoutReading(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"-n", "-e", `$ = {ready: true}`, "-c"}, failingReader{}, &out); err != nil {
+	stdin := terminalReader{failingReader{}}
+	if err := run([]string{"-e", `$ = {ready: true}`, "-c"}, stdin, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := out.String(), "{\"ready\":true}\n"; got != want {
@@ -69,7 +75,7 @@ func TestNullInputInitializesRootWithoutReading(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := run([]string{"--null-input", "-e", `$`, "-r", "-c"}, failingReader{}, &out); err != nil {
+	if err := run([]string{"-e", `$`, "-r", "-c"}, stdin, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := out.String(), "null\n"; got != want {
@@ -79,7 +85,7 @@ func TestNullInputInitializesRootWithoutReading(t *testing.T) {
 
 func TestNullInputCanReturnObjectLiteral(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"-n", "-r", "-e", `{age:18}`}, failingReader{}, &out); err != nil {
+	if err := run([]string{"-r", "-e", `{age:18}`}, terminalReader{failingReader{}}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := out.String(), "{\n  \"age\": 18\n}\n"; got != want {
@@ -92,16 +98,61 @@ func TestCombinedShortOptions(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-nre", `{age:18}`}, "{\n  \"age\": 18\n}\n"},
-		{[]string{`-nre{age:18}`}, "{\n  \"age\": 18\n}\n"},
-		{[]string{"-nre", `-1`}, "-1\n"},
+		{[]string{"-re", `{age:18}`}, "{\n  \"age\": 18\n}\n"},
+		{[]string{`-re{age:18}`}, "{\n  \"age\": 18\n}\n"},
+		{[]string{"-re", `-1`}, "-1\n"},
 	} {
 		var out bytes.Buffer
-		if err := run(tc.args, failingReader{}, &out); err != nil {
+		if err := run(tc.args, terminalReader{failingReader{}}, &out); err != nil {
 			t.Fatalf("run(%v) returned error: %v", tc.args, err)
 		}
 		if got := out.String(); got != tc.want {
 			t.Fatalf("run(%v) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestLogOutputPrecedesProcessedJSON(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-e", `log("created", 1); $ = {ok:true}`, "-c"}, terminalReader{failingReader{}}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "created 1\n{\"ok\":true}\n"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestNoOutputSuppressesFinalValueButKeepsLog(t *testing.T) {
+	for _, args := range [][]string{
+		{"-n", "-e", `log("visible", 2); $ = {hidden:true}`},
+		{"-ne", `log("visible", 2); $ = {hidden:true}`},
+	} {
+		var out bytes.Buffer
+		if err := run(args, terminalReader{failingReader{}}, &out); err != nil {
+			t.Fatalf("run(%v) returned error: %v", args, err)
+		}
+		if got, want := out.String(), "visible 2\n"; got != want {
+			t.Fatalf("run(%v) = %q, want %q", args, got, want)
+		}
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{"--no-output", "-e", `$ = 1`}, terminalReader{failingReader{}}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("unexpected output %q", out.String())
+	}
+}
+
+func TestNoOutputRejectsExplicitOutputTargets(t *testing.T) {
+	for _, args := range [][]string{
+		{"-n", "-e", `$`, "-o", "out.json"},
+		{"-n", "-e", `$`, "-i", "input.json"},
+	} {
+		err := run(args, failingReader{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "no-output cannot be used") {
+			t.Fatalf("run(%v) error = %v", args, err)
 		}
 	}
 }
@@ -118,14 +169,18 @@ func TestCombinedShortOptionsPreserveSingleDashLongFlags(t *testing.T) {
 	}
 }
 
-func TestNullInputRejectsInputFileAndInPlace(t *testing.T) {
-	for _, args := range [][]string{
-		{"-n", "-e", `$`, "input.json"},
-		{"-n", "-e", `$`, "-i"},
-	} {
-		err := run(args, failingReader{}, &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "null-input cannot be used") {
-			t.Fatalf("run(%v) error = %v", args, err)
+func TestEmptyRedirectedInputIsNotTreatedAsNoInput(t *testing.T) {
+	err := run([]string{"-e", `$`}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected empty redirected input to fail JSON parsing")
+	}
+}
+
+func TestObsoleteOptionsAreRemoved(t *testing.T) {
+	for _, option := range []string{"-q", "--null-input"} {
+		err := run([]string{option, "-e", `$`}, terminalReader{failingReader{}}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("run(%q) error = %v", option, err)
 		}
 	}
 }
@@ -149,7 +204,7 @@ func TestHelp(t *testing.T) {
 			!strings.Contains(out.String(), "--version") ||
 			!strings.Contains(out.String(), "--syntax") ||
 			!strings.Contains(out.String(), "--pretty") ||
-			!strings.Contains(out.String(), "--null-input") ||
+			!strings.Contains(out.String(), "--no-output") ||
 			!strings.Contains(out.String(), "JSON/JSONC") ||
 			!strings.Contains(out.String(), "$ = value") ||
 			!strings.Contains(out.String(), "--syntax") {
@@ -172,7 +227,7 @@ func TestLanguageHelp(t *testing.T) {
 	for _, want := range []string{
 		"jsonsh " + version + " scripting language reference",
 		"Values and literals:", "Operators, from lowest", "for (value of array)",
-		"typeof(value)", "string.length", "array.length", "toLowerCase()",
+		"log(value, ...)", "env(name)", "typeof(value)", "string.length", "array.length", "toLowerCase()",
 		"lastIndexOf(text[, start])", "matchAll(pattern)", "replaceAll(pattern, replacement)",
 		"splice(start[, deleteCount, ...items])", "lastIndexOf(value[, start])",
 		"Go regular expressions", "typeof(null)",

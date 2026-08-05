@@ -86,4 +86,4 @@ go build -trimpath -ldflags "-X main.version=$build_version" -o "$output_file" .
 echo
 echo "Build succeeded: $output_file"
 echo "Version: $build_version"
-sleep 2
+sleep 1.5

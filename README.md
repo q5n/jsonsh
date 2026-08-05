@@ -6,18 +6,32 @@
 go run ./cmd/jsonsh -e '$.price *= 0.8' input.json
 go run ./cmd/jsonsh -e '$.users.length' -r input.json
 cat input.json | go run ./cmd/jsonsh -e 'delete $.password'
-go run ./cmd/jsonsh -n -e '$ = {status: "ok"}'
+go run ./cmd/jsonsh -e '$ = {status: "ok"}'
 ```
 
-Use `-n` or `--null-input` to skip standard input and input files and initialize
-the root value `$` to `null`. This is useful when a script creates its root value
-from scratch.
+When no input file is given and standard input is not redirected or piped, the
+root value `$` is initialized to `null`. This is useful when a script creates its
+root value from scratch.
 
 Boolean short options can be grouped. A value-taking short option can appear at
 the end of a group, so the previous example can also be written as:
 
 ```bash
-jsonsh -nre "{status: 'ok'}"
+jsonsh -re "{status: 'ok'}"
+```
+
+Use `-n` or `--no-output` to suppress the final processed JSON while keeping
+`log(...)` output visible:
+
+```bash
+jsonsh -ne "log('done')"
+```
+
+Use `-n` or `--no-output` to suppress the final processed JSON while keeping
+`log(...)` output visible:
+
+```bash
+jsonsh -ne "log('done')"
 ```
 
 By default, `jsonsh` rewrites only values that actually change. Existing indentation, line endings, property order, comments, string escapes, and number formatting remain untouched. Use `--pretty` to reformat the document while preserving comments, or `--compact` to emit compact, comment-free standard JSON.
