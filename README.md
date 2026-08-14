@@ -1,12 +1,17 @@
 # jsonsh
 
-`jsonsh` is a lightweight JSON/JSONC scripting tool written in pure Go. The root value is available through `$`. It has no third-party dependencies and does not embed or invoke a JavaScript engine. Input files may contain `//` line comments, `/* ... */` block comments, and trailing commas.
+`jsonsh` is a lightweight JSON/JSONC scripting tool. The root value is available through `$`. It does not embed or invoke a JavaScript engine. Input files may contain `//` line comments, `/* ... */` block comments, and trailing commas.
+
+Two behaviorally identical implementations are provided:
+
+- **Go** — pure Go, zero third-party dependencies, in [`go_version/`](go_version/).
+- **Rust** — in [`rust_version/`](rust_version/), depending only on `regex` and `unicode-general-category`.
 
 ```bash
-go run ./cmd/jsonsh -e '$.price *= 0.8' input.json
-go run ./cmd/jsonsh -e '$.users.length' -r input.json
-cat input.json | go run ./cmd/jsonsh -e 'delete $.password'
-go run ./cmd/jsonsh -e '$ = {status: "ok"}'
+jsonsh -e '$.price *= 0.8' input.json
+jsonsh -e '$.users.length' -r input.json
+cat input.json | jsonsh -e 'delete $.password'
+jsonsh -e '$ = {status: "ok"}'
 ```
 
 When no input file is given and standard input is not redirected or piped, the
@@ -18,13 +23,6 @@ the end of a group, so the previous example can also be written as:
 
 ```bash
 jsonsh -re "{status: 'ok'}"
-```
-
-Use `-n` or `--no-output` to suppress the final processed JSON while keeping
-`log(...)` output visible:
-
-```bash
-jsonsh -ne "log('done')"
 ```
 
 Use `-n` or `--no-output` to suppress the final processed JSON while keeping
@@ -61,39 +59,55 @@ $.ready = true
 
 ## Build and test
 
+### Rust version (`rust_version/`)
+
 ```bash
-go build ./cmd/jsonsh
-go test ./...
+cd rust_version
+cargo test                   # run all tests
+cargo build --release        # build to target/release/jsonsh(.exe)
+```
+
+The release profile strips symbols and enables LTO (`strip = true`, `lto = true`,
+`codegen-units = 1`, `panic = "abort"`), producing a small, dependency-free binary.
+The version comes from the `version` field in `Cargo.toml` (baked in at compile time
+via `CARGO_PKG_VERSION`).
+
+### Go version (`go_version/`)
+
+```bash
+cd go_version
+go build ./cmd/jsonsh        # build to go_version/jsonsh(.exe)
+go test ./...                # run all tests
+go vet ./...                 # static analysis
 ```
 
 On Linux Bash or Windows Git Bash/MSYS, use the build script. It runs the test
-suite and builds for the current Go target. The output is `dist/jsonsh` on Linux
-or `dist/jsonsh` on Windows:
+suite and builds to `go_version/dist/jsonsh` (or `.exe`), injecting the version
+via `-ldflags "-X main.version=..."` (derived from Git by default):
 
 ```bash
-bash ./build.sh
-bash ./build.sh --skip-tests
+cd go_version
+bash ./build-go.sh
+bash ./build-go.sh --skip-tests
+bash ./build-go.sh --version v0.2.1
 ```
 
 To view the complete command-line help:
 
 ```bash
-./dist/jsonsh --help
+jsonsh --help
 ```
 
 To display the build version:
 
 ```bash
-./dist/jsonsh -v
+jsonsh -v
 ```
 
 To display the built-in scripting language reference:
 
 ```bash
-./dist/jsonsh --syntax
+jsonsh --syntax
 ```
 
-The version is injected at build time. `build.sh` derives it from Git by default,
-or accepts an explicit value with `--version v0.2.1`.
-
-See [docs/spec.md](docs/spec.md) for the complete language semantics, built-in functions, and command-line options.
+See [go_version/docs/spec.md](go_version/docs/spec.md) for the complete language semantics, built-in functions, and command-line options.

@@ -5,7 +5,14 @@ edition = "2021"
 description = "Process JSON/JSONC with JavaScript-like expressions (Rust port)"
 
 [dependencies]
-regex = "1"
+regex = { version = "1", default-features = false, features = [
+    "std",
+    "perf",
+    "unicode-gencat",
+    "unicode-script",
+    "unicode-case",
+    "unicode-perl",
+] }
 unicode-general-category = "1"
 
 [lib]
@@ -18,6 +25,7 @@ path = "src/main.rs"
 
 [profile.release]
 strip = true
-lto = true
+lto = "fat"
 codegen-units = 1
+opt-level = "z"
 panic = "abort"
