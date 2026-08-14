@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -201,10 +202,12 @@ Examples:
 	var output string
 	if o.result {
 		var data []byte
-		if o.compact {
-			data, e = json.Marshal(last)
-		} else {
-			data, e = json.MarshalIndent(last, "", "  ")
+		data, e = jsonc.Marshal(last)
+		if e == nil && !o.compact {
+			var buf bytes.Buffer
+			if e = json.Indent(&buf, data, "", "  "); e == nil {
+				data = buf.Bytes()
+			}
 		}
 		output = string(data) + "\n"
 	} else if o.compact {
@@ -349,8 +352,9 @@ Statements:
   break;
   continue;
 
-  Statements are separated by semicolons. Repeated semicolons and semicolons
-  after blocks are allowed. Control-flow bodies must use braces.
+  Statements are separated by semicolons or line breaks. Repeated semicolons
+  and semicolons after blocks are allowed. Expressions may continue across
+  lines when syntactically incomplete. Control-flow bodies must use braces.
 
 Operators, from lowest to highest precedence:
   =  +=  -=  *=  /=
@@ -385,6 +389,8 @@ String methods:
   indexOf(text[, start])
   lastIndexOf(text[, start])
   localeCompare(text)
+  padStart(targetLength[, padString])
+  padEnd(targetLength[, padString])
   trim()
   split(pattern[, limit])
   match(pattern)

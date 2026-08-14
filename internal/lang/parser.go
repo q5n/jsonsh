@@ -128,10 +128,14 @@ func (p *parser) startsObjectLiteral() bool {
 }
 
 func (p *parser) endStmt() error {
-	if p.match(tSemi) || p.peek().kind == tRBrace || p.peek().kind == tEOF {
+	if p.match(tSemi) || p.peek().kind == tRBrace || p.peek().kind == tEOF || p.hasLineBreak() {
 		return nil
 	}
-	return p.err(p.peek(), "expected ';' between statements")
+	return p.err(p.peek(), "expected ';' or newline between statements")
+}
+
+func (p *parser) hasLineBreak() bool {
+	return p.i > 0 && p.ts[p.i-1].pos.Line < p.peek().pos.Line
 }
 func (p *parser) block() (*Block, error) {
 	t, _ := p.need(tLBrace, "expected '{'")

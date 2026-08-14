@@ -7,6 +7,10 @@
 - `-c` / `--compact` emits compact standard JSON and removes comments.
 - `--pretty` and `--compact` are mutually exclusive.
 
+## String escaping in re-encoded output
+
+Whenever a string is re-encoded rather than reused verbatim (`-c` / `--compact`, `-r` / `--result`, newly added or changed values, and object `toString()` / `log`), non-printable runes are emitted as `\uXXXX` escapes while printable text is kept in its original UTF-8 form. Non-printable includes control, format, surrogate, private-use (e.g. `\uee63`), and unassigned characters, as well as non-ASCII spaces and the U+2028/U+2029 line separators. HTML-sensitive characters (`<`, `>`, `&`) are escaped to match `encoding/json`. Supplementary-plane runes use surrogate pairs (`\udb80\udc00`), and invalid UTF-8 becomes `\ufffd`. Letters, marks, digits, punctuation, and symbols (including CJK and accented letters) are left as raw UTF-8.
+
 ## Input syntax
 
 Input uses JSONC: standard JSON extended with `//` line comments, `/* ... */` block comments, and trailing commas. Single-quoted strings, unquoted property names, `NaN`, and `Infinity` are not supported. These restrictions apply to JSONC input only; the scripting language has its own syntax rules.

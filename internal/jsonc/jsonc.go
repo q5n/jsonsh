@@ -422,7 +422,7 @@ func (d *Document) renderObject(n *Node, v map[string]any) (string, error) {
 		} else {
 			b.WriteString(style.next)
 		}
-		kb, _ := json.Marshal(k)
+		kb := appendJSONString(nil, k)
 		b.Write(kb)
 		b.WriteString(style.colon)
 		s, e := encode(v[k])
@@ -630,7 +630,7 @@ func closingWhitespace(s string) string {
 	}
 	return s
 }
-func encode(v any) (string, error) { b, e := json.Marshal(v); return string(b), e }
+func encode(v any) (string, error) { b, e := Marshal(v); return string(b), e }
 
 func Compact(v any) (string, error) { return encode(v) }
 func PrettyPreserve(src string, indent string) (string, error) {

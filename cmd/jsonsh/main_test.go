@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,6 +53,28 @@ func TestRunEmptyExpressionDoesNothing(t *testing.T) {
 	}
 	if got, want := out.String(), "null\n"; got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestScriptFileSupportsNewlineSeparatedStatements(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "update.js")
+	code := `
+$.count += 2
+$.name = $.name
+  .padEnd(4, "!")
+$.ready = true
+`
+	if err := os.WriteFile(script, []byte(code), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{"-f", script, "-c"}, strings.NewReader(`{"count":1,"name":"go"}`), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "{\"count\":3,\"name\":\"go!!\",\"ready\":true}\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -228,7 +252,8 @@ func TestLanguageHelp(t *testing.T) {
 		"jsonsh " + version + " scripting language reference",
 		"Values and literals:", "Operators, from lowest", "for (value of array)",
 		"log(value, ...)", "env(name)", "typeof(value)", "string.length", "array.length", "toLowerCase()",
-		"lastIndexOf(text[, start])", "matchAll(pattern)", "replaceAll(pattern, replacement)",
+		"lastIndexOf(text[, start])", "padStart(targetLength[, padString])", "padEnd(targetLength[, padString])",
+		"matchAll(pattern)", "replaceAll(pattern, replacement)",
 		"splice(start[, deleteCount, ...items])", "lastIndexOf(value[, start])",
 		"Go regular expressions", "typeof(null)",
 	} {
@@ -321,5 +346,25 @@ func TestRunCanReplaceRootAndKeepsOuterTrivia(t *testing.T) {
 	want := "// before\n[1,2]\n// after\n"
 	if out.String() != want {
 		t.Fatalf("got %q want %q", out.String(), want)
+	}
+}
+
+func TestRunResultAndCompactPreserveUnicodeEscapes(t *testing.T) {
+	src := `{"icon":"\uee63","name":"Ubuntu 24.04.1 LTS"}`
+	var out bytes.Buffer
+	if err := run([]string{"-e", `$.hidden = true`, "-c"}, strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"hidden":true,"icon":"\uee63","name":"Ubuntu 24.04.1 LTS"}` + "\n"
+	if out.String() != want {
+		t.Fatalf("compact got %q want %q", out.String(), want)
+	}
+
+	out.Reset()
+	if err := run([]string{"-e", `$.icon`, "-r", "-c"}, strings.NewReader(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), `"\uee63"`+"\n"; got != want {
+		t.Fatalf("result got %q want %q", got, want)
 	}
 }

@@ -2,3 +2,6 @@
 /jsonsh.exe
 *.test
 /dist/
+.codegraph/
+.test.bat
+.tips.txt

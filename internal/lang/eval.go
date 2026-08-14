@@ -1,7 +1,6 @@
 package lang
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -12,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"jsonsh/internal/jsonc"
 )
 
 type Runtime struct {
@@ -714,6 +715,39 @@ func (r *Runtime) stringMethod(p Pos, s, name string, args []any) (any, error) {
 			return nil, r.fail(p, "localeCompare requires a string argument")
 		}
 		return float64(strings.Compare(s, other)), nil
+	case "padStart", "padEnd":
+		if len(args) < 1 || len(args) > 2 {
+			return nil, r.fail(p, "%s expects 1 or 2 arguments", name)
+		}
+		targetLength, ok := integerArg(args[0])
+		if !ok || targetLength < 0 {
+			return nil, r.fail(p, "%s target length must be a non-negative integer", name)
+		}
+		pad := " "
+		if len(args) == 2 {
+			pad, ok = args[1].(string)
+			if !ok {
+				return nil, r.fail(p, "%s padding must be a string", name)
+			}
+		}
+		padRunes := []rune(pad)
+		if targetLength <= len(runes) || len(padRunes) == 0 {
+			return s, nil
+		}
+		paddingLength := targetLength - len(runes)
+		result := make([]rune, targetLength)
+		if name == "padStart" {
+			for i := 0; i < paddingLength; i++ {
+				result[i] = padRunes[i%len(padRunes)]
+			}
+			copy(result[paddingLength:], runes)
+		} else {
+			copy(result, runes)
+			for i := 0; i < paddingLength; i++ {
+				result[len(runes)+i] = padRunes[i%len(padRunes)]
+			}
+		}
+		return string(result), nil
 	case "split", "match", "matchAll", "replace", "replaceAll":
 		return r.regexpStringMethod(p, s, name, args)
 	default:
@@ -948,7 +982,7 @@ func valueString(v any) string {
 		}
 		return strings.Join(parts, ",")
 	case map[string]any:
-		b, err := json.Marshal(exportValue(x))
+		b, err := jsonc.Marshal(exportValue(x))
 		if err == nil {
 			return string(b)
 		}

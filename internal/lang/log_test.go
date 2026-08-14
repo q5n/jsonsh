@@ -29,3 +29,14 @@ func TestExecuteDiscardsLogOutputByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLogPreservesUnicodeEscapes(t *testing.T) {
+	var output bytes.Buffer
+	_, _, err := ExecuteWithOutput(`log({icon: "\uee63"});`, nil, 1000, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "{\"icon\":\"\\uee63\"}\n"; got != want {
+		t.Fatalf("output=%q want %q", got, want)
+	}
+}

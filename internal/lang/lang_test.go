@@ -75,6 +75,26 @@ func TestShortCircuitAndErrors(t *testing.T) {
 	}
 }
 
+func TestNewlinesSeparateStatements(t *testing.T) {
+	root, last := run(t, `
+		x = 1
+		y = x +
+			2
+		// A comment-ending newline also separates statements.
+		$ = {
+			total: y,
+			label: "go"
+				.padEnd(4, "!")
+		}
+		$.done = true
+		$.total
+	`, nil)
+	want := map[string]any{"total": float64(3), "label": "go!!", "done": true}
+	if !reflect.DeepEqual(root, want) || last != float64(3) {
+		t.Fatalf("root=%#v last=%#v, want root=%#v last=3", root, last, want)
+	}
+}
+
 func TestMissingObjectPropertyReturnsNull(t *testing.T) {
 	root, last := run(t, `
 		$.dot = $.missing;

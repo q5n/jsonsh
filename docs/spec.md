@@ -24,7 +24,7 @@ An assignment target must be a variable or member expression. Compound assignmen
 
 ## Statements
 
-Statements are separated by semicolons. The final semicolon in a block, or immediately before `}`, may be omitted. Control-flow bodies must use braces.
+Statements are separated by semicolons or line breaks. A line break separates statements after a complete expression; syntactically incomplete expressions can continue on following lines. The final semicolon in a block, or immediately before `}`, may be omitted. Control-flow bodies must use braces.
 
 ```js
 if (condition) { ... } else if (condition) { ... } else { ... }
@@ -44,7 +44,7 @@ continue;
 - `log(value, ...)` writes its arguments to standard output separated by spaces and followed by a newline, using the language's `toString()` rules. It accepts zero or more arguments and returns `null`. Logs remain on standard output when the processed JSON is written with `-o` or `-i`.
 - `env(name)` returns the named environment variable as a string, including an empty string when the variable is set but empty. It returns `null` when the variable is not set. The name must be a string.
 - Strings and arrays provide a read-only `length` property. String length counts Unicode code points.
-- Strings provide `toLowerCase()`, `toUpperCase()`, `substring(start[, end])`, `indexOf(text[, start])`, `lastIndexOf(text[, start])`, `localeCompare(text)`, `split(pattern[, limit])`, `match(pattern)`, `matchAll(pattern)`, `replace(pattern, replacement)`, `replaceAll(pattern, replacement)`, and `trim()`. Pattern arguments use Go regular-expression syntax, not JavaScript regex literals. `match` returns the full first match followed by its capture groups, or `null`; `matchAll` returns an array of those match arrays. Replacement strings use Go expansion syntax such as `$1`.
+- Strings provide `toLowerCase()`, `toUpperCase()`, `substring(start[, end])`, `indexOf(text[, start])`, `lastIndexOf(text[, start])`, `localeCompare(text)`, `padStart(targetLength[, padString])`, `padEnd(targetLength[, padString])`, `split(pattern[, limit])`, `match(pattern)`, `matchAll(pattern)`, `replace(pattern, replacement)`, `replaceAll(pattern, replacement)`, and `trim()`. String lengths and padding operate on Unicode code points. Padding defaults to a space. Pattern arguments use Go regular-expression syntax, not JavaScript regex literals. `match` returns the full first match followed by its capture groups, or `null`; `matchAll` returns an array of those match arrays. Replacement strings use Go expansion syntax such as `$1`.
 - Arrays provide `push(value, ...)`, `splice(start[, deleteCount, ...items])`, `join([separator])`, `indexOf(value[, start])`, and `lastIndexOf(value[, start])`. Array searches use the language's recursive deep equality.
 - `typeof(v)` returns `string`, `array`, `object`, `boolean`, or `number`. Like JavaScript, `typeof(null)` returns `object`.
 - `keys(v)` returns object keys in lexicographic order or numeric array indexes.

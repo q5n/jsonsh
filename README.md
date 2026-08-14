@@ -49,6 +49,16 @@ You can also replace the entire JSON root value:
 $ = {status: "ok", items: []};
 ```
 
+Script files passed with `-f` may separate statements with line breaks instead
+of semicolons. Incomplete expressions can continue on the next line:
+
+```js
+$.count += 1
+$.label = $.label
+  .padEnd(10, ".")
+$.ready = true
+```
+
 ## Build and test
 
 ```bash

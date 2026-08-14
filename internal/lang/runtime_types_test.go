@@ -15,10 +15,17 @@ func TestStringPropertiesAndMethods(t *testing.T) {
 		$.substring = "A中BC".substring(3, 1);
 		$.index = "A中BC中".indexOf("中", 2);
 		$.missing = "abc".indexOf("z");
+		$.padStart = "中x".padStart(5, "ab");
+		$.padEnd = "中x".padEnd(5, "😀文");
+		$.defaultPad = "x".padStart(3);
+		$.emptyPad = "x".padEnd(3, "");
+		$.noPad = "hello".padStart(3, "0");
 	`, map[string]any{})
 	want := map[string]any{
 		"length": float64(5), "lower": "go语言", "upper": "GO语言",
 		"trimmed": "hello", "substring": "中B", "index": float64(4), "missing": float64(-1),
+		"padStart": "aba中x", "padEnd": "中x😀文😀", "defaultPad": "  x",
+		"emptyPad": "x", "noPad": "hello",
 	}
 	if !reflect.DeepEqual(root, want) {
 		t.Fatalf("root=%#v, want %#v", root, want)
@@ -108,6 +115,9 @@ func TestNewMethodArgumentErrors(t *testing.T) {
 	}{
 		{`"x".substring();`, "1 or 2 arguments"},
 		{`"x".indexOf(1);`, "string needle"},
+		{`"x".padStart();`, "1 or 2 arguments"},
+		{`"x".padEnd(-1);`, "non-negative integer"},
+		{`"x".padStart(3, 1);`, "padding must be a string"},
 		{`[1].join(2);`, "separator must be a string"},
 		{`[1].splice();`, "at least 1 argument"},
 		{`typeof();`, "expects 1 argument"},

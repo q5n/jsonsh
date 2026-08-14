@@ -137,3 +137,41 @@ func TestJSONCErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestMarshalEscapesNonPrintableRunes(t *testing.T) {
+	got, err := Marshal(map[string]any{
+		"icon": "\uee63",
+		"name": "Ubuntu 24.04.1 LTS",
+		"中文":   "保留",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"icon":"\uee63","name":"Ubuntu 24.04.1 LTS","中文":"保留"}`
+	if string(got) != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestMarshalEscapesControlFormatAndPrivateUse(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{string([]byte{0x01}), `"\u0001"`},
+		{string(rune(0x2028)), `"\u2028"`},
+		{"\u200e", `"\u200e"`},
+		{string(rune(0xF0000)), `"\udb80\udc00"`},
+		{string([]byte{0xff, 0xfe}), `"\ufffd\ufffd"`},
+		{"<>&", `"\u003c\u003e\u0026"`},
+	}
+	for _, tc := range cases {
+		got, err := Marshal(tc.in)
+		if err != nil {
+			t.Fatalf("Marshal(%q): %v", tc.in, err)
+		}
+		if string(got) != tc.want {
+			t.Fatalf("Marshal(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
