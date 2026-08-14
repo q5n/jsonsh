@@ -46,6 +46,13 @@ nextVer="${major}.${minor}.${patch}"
 nextVerTag="v$nextVer"
 
 echo "nextVerTag: $nextVerTag"
+
+# 更新 rust_version/Cargo.toml 的 version 字段（二进制经 env!("CARGO_PKG_VERSION") 读取该值）
+sed -i "s/^version = .*/version = \"${nextVer}\"/" rust_version/Cargo.toml
+# 同步 Cargo.lock 中 jsonsh 包的 version 字段，保持二者一致
+sed -i "/^name = \"jsonsh\"$/{n;s/^version = .*/version = \"${nextVer}\"/;}" rust_version/Cargo.lock
+echo "updated rust_version/Cargo.toml version to ${nextVer}"
+
 git add -A
 git commit -m "release $nextVerTag"
 

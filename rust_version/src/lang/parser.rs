@@ -1,0 +1,380 @@
+use crate::value::Value;
+
+use super::ast::{Expr, Program, Stmt};
+use super::token::{Error, Pos, Tok, Token};
+
+struct Parser {
+    ts: Vec<Token>,
+    i: usize,
+    loops: usize,
+}
+
+pub fn parse(src: &str) -> Result<Program, Error> {
+    let ts = super::lexer::lex(src)?;
+    let mut p = Parser { ts, i: 0, loops: 0 };
+    let mut list = Vec::new();
+    while p.peek().kind != Tok::Eof {
+        if p.match_kind(Tok::Semi) {
+            continue;
+        }
+        let s = p.stmt()?;
+        list.push(s);
+    }
+    Ok(Program { list })
+}
+
+impl Parser {
+    fn peek(&self) -> &Token {
+        &self.ts[self.i]
+    }
+
+    fn next(&mut self) -> Token {
+        let t = self.ts[self.i].kind;
+        let lit = self.ts[self.i].lit.clone();
+        let pos = self.ts[self.i].pos;
+        if self.i < self.ts.len() - 1 {
+            self.i += 1;
+        }
+        Token { kind: t, lit, pos }
+    }
+
+    fn match_kind(&mut self, k: Tok) -> bool {
+        if self.peek().kind == k {
+            self.next();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn need(&mut self, k: Tok, msg: &str) -> Result<Token, Error> {
+        if self.peek().kind != k {
+            return Err(self.err(self.peek(), msg));
+        }
+        Ok(self.next())
+    }
+
+    fn err(&self, t: &Token, msg: &str) -> Error {
+        Error::new("SyntaxError", t.pos, msg.to_string())
+    }
+
+    fn err_pos(&self, pos: Pos, msg: &str) -> Error {
+        Error::new("SyntaxError", pos, msg.to_string())
+    }
+
+    fn stmt(&mut self) -> Result<Stmt, Error> {
+        let t = self.peek().clone();
+        match t.kind {
+            Tok::LBrace => {
+                if !self.starts_object_literal() {
+                    return self.block();
+                }
+                let x = self.expression()?;
+                self.end_stmt()?;
+                Ok(Stmt::Expr(t.pos, x))
+            }
+            Tok::If => self.if_stmt(),
+            Tok::For => self.for_stmt(),
+            Tok::Delete => {
+                self.next();
+                let x = self.expression()?;
+                if !matches!(x, Expr::Member(..)) {
+                    return Err(self.err(&t, "delete target must be a member"));
+                }
+                self.end_stmt()?;
+                Ok(Stmt::Delete(t.pos, x))
+            }
+            Tok::Break => {
+                self.next();
+                if self.loops == 0 {
+                    return Err(self.err(&t, "break outside loop"));
+                }
+                self.end_stmt()?;
+                Ok(Stmt::Break(t.pos))
+            }
+            Tok::Continue => {
+                self.next();
+                if self.loops == 0 {
+                    return Err(self.err(&t, "continue outside loop"));
+                }
+                self.end_stmt()?;
+                Ok(Stmt::Continue(t.pos))
+            }
+            _ => {
+                let x = self.expression()?;
+                self.end_stmt()?;
+                Ok(Stmt::Expr(t.pos, x))
+            }
+        }
+    }
+
+    fn starts_object_literal(&self) -> bool {
+        if self.peek().kind != Tok::LBrace || self.i + 1 >= self.ts.len() {
+            return false;
+        }
+        let next = self.ts[self.i + 1].kind;
+        if next == Tok::RBrace {
+            return true;
+        }
+        self.i + 2 < self.ts.len()
+            && (next == Tok::Ident || next == Tok::String)
+            && self.ts[self.i + 2].kind == Tok::Colon
+    }
+
+    fn end_stmt(&mut self) -> Result<(), Error> {
+        if self.match_kind(Tok::Semi)
+            || self.peek().kind == Tok::RBrace
+            || self.peek().kind == Tok::Eof
+            || self.has_line_break()
+        {
+            return Ok(());
+        }
+        Err(self.err(self.peek(), "expected ';' or newline between statements"))
+    }
+
+    fn has_line_break(&self) -> bool {
+        self.i > 0 && self.ts[self.i - 1].pos.line < self.peek().pos.line
+    }
+
+    fn block(&mut self) -> Result<Stmt, Error> {
+        // Mirror Go: the missing-`{` error from need() is discarded (see Go's
+        // `t, _ := p.need(tLBrace, "expected '{'")`), so a brace-less body is
+        // scanned as statements until `}` or EOF, reporting "expected '}'".
+        let t = self
+            .need(Tok::LBrace, "expected '{'")
+            .unwrap_or_else(|_| Token {
+                kind: Tok::Eof,
+                lit: String::new(),
+                pos: Pos { line: 0, col: 0 },
+            });
+        let mut xs = Vec::new();
+        while self.peek().kind != Tok::RBrace {
+            if self.peek().kind == Tok::Eof {
+                return Err(self.err(self.peek(), "expected '}'"));
+            }
+            if self.match_kind(Tok::Semi) {
+                continue;
+            }
+            let s = self.stmt()?;
+            xs.push(s);
+        }
+        self.next();
+        Ok(Stmt::Block(t.pos, xs))
+    }
+
+    fn if_stmt(&mut self) -> Result<Stmt, Error> {
+        let t = self.next();
+        self.need(Tok::LParen, "expected '(' after if")?;
+        let c = self.expression()?;
+        self.need(Tok::RParen, "expected ')' after condition")?;
+        let b = self.block()?;
+        let mut alt = None;
+        if self.match_kind(Tok::Else) {
+            alt = Some(if self.peek().kind == Tok::If {
+                Box::new(self.if_stmt()?)
+            } else {
+                Box::new(self.block()?)
+            });
+        }
+        Ok(Stmt::If(t.pos, c, Box::new(b), alt))
+    }
+
+    fn for_stmt(&mut self) -> Result<Stmt, Error> {
+        let t = self.next();
+        self.need(Tok::LParen, "expected '(' after for")?;
+        let n = self.need(Tok::Ident, "expected loop variable")?;
+        let of = if self.match_kind(Tok::In) {
+            false
+        } else if self.match_kind(Tok::Of) {
+            true
+        } else {
+            return Err(self.err(self.peek(), "expected 'in' or 'of'"));
+        };
+        let src = self.expression()?;
+        self.need(Tok::RParen, "expected ')' after source")?;
+        self.loops += 1;
+        let b = self.block();
+        self.loops -= 1;
+        let b = b?;
+        Ok(Stmt::For(t.pos, n.lit, of, src, Box::new(b)))
+    }
+
+    fn expression(&mut self) -> Result<Expr, Error> {
+        self.binary(1)
+    }
+
+    fn binary(&mut self, min: i32) -> Result<Expr, Error> {
+        let mut left = self.unary()?;
+        loop {
+            let op = self.peek().clone();
+            let q = match prec(op.kind) {
+                Some(q) => q,
+                None => break,
+            };
+            if q < min {
+                break;
+            }
+            self.next();
+            let next = if q == 1 { q } else { q + 1 };
+            let right = self.binary(next)?;
+            if q == 1 {
+                match left {
+                    Expr::Variable(..) | Expr::Member(..) => {}
+                    _ => return Err(self.err(&op, "invalid assignment target")),
+                }
+                left = Expr::Assign(op.pos, op.kind, Box::new(left), Box::new(right));
+            } else {
+                left = Expr::Binary(op.pos, op.kind, Box::new(left), Box::new(right));
+            }
+        }
+        Ok(left)
+    }
+
+    fn unary(&mut self) -> Result<Expr, Error> {
+        if self.peek().kind == Tok::Bang || self.peek().kind == Tok::Minus {
+            let t = self.next();
+            let x = self.unary()?;
+            return Ok(Expr::Unary(t.pos, t.kind, Box::new(x)));
+        }
+        self.postfix()
+    }
+
+    fn postfix(&mut self) -> Result<Expr, Error> {
+        let mut x = self.primary()?;
+        loop {
+            if self.match_kind(Tok::Dot) {
+                let n = self.need(Tok::Ident, "expected property name")?;
+                x = Expr::Member(
+                    n.pos,
+                    Box::new(x),
+                    Box::new(Expr::Literal(n.pos, Value::String(n.lit))),
+                );
+                continue;
+            }
+            if self.match_kind(Tok::LBracket) {
+                let pos = self.peek().pos;
+                let k = self.expression()?;
+                self.need(Tok::RBracket, "expected ']'")?;
+                x = Expr::Member(pos, Box::new(x), Box::new(k));
+                continue;
+            }
+            if self.match_kind(Tok::LParen) {
+                let m = match x {
+                    Expr::Member(p, obj, key) => (p, obj, key),
+                    _ => {
+                        return Err(
+                            self.err(self.peek(), "only named functions and methods can be called")
+                        )
+                    }
+                };
+                let name = match *m.2 {
+                    Expr::Literal(_, Value::String(s)) => s,
+                    _ => return Err(self.err_pos(m.0, "method name must be a property name")),
+                };
+                let args = self.call_args()?;
+                x = Expr::MethodCall(m.0, m.1, name, args);
+                continue;
+            }
+            break;
+        }
+        Ok(x)
+    }
+
+    fn primary(&mut self) -> Result<Expr, Error> {
+        let t = self.next();
+        match t.kind {
+            Tok::Number => {
+                let n: f64 = t.lit.parse().unwrap_or(0.0);
+                Ok(Expr::Literal(t.pos, Value::Number(n)))
+            }
+            Tok::String => Ok(Expr::Literal(t.pos, Value::String(t.lit))),
+            Tok::True => Ok(Expr::Literal(t.pos, Value::Bool(true))),
+            Tok::False => Ok(Expr::Literal(t.pos, Value::Bool(false))),
+            Tok::Null => Ok(Expr::Literal(t.pos, Value::Null)),
+            Tok::Dollar => Ok(Expr::Variable(t.pos, "$".to_string())),
+            Tok::Ident => {
+                if self.match_kind(Tok::LParen) {
+                    let args = self.call_args()?;
+                    Ok(Expr::Call(t.pos, t.lit, args))
+                } else {
+                    Ok(Expr::Variable(t.pos, t.lit))
+                }
+            }
+            Tok::LParen => {
+                let x = self.expression()?;
+                self.need(Tok::RParen, "expected ')'")?;
+                Ok(x)
+            }
+            Tok::LBracket => {
+                let mut xs = Vec::new();
+                if !self.match_kind(Tok::RBracket) {
+                    loop {
+                        let x = self.expression()?;
+                        xs.push(x);
+                        if self.match_kind(Tok::RBracket) {
+                            break;
+                        }
+                        self.need(Tok::Comma, "expected ',' or ']'")?;
+                        if self.match_kind(Tok::RBracket) {
+                            break;
+                        }
+                    }
+                }
+                Ok(Expr::Array(t.pos, xs))
+            }
+            Tok::LBrace => {
+                let mut xs: Vec<(String, Expr)> = Vec::new();
+                if !self.match_kind(Tok::RBrace) {
+                    loop {
+                        let k = self.next();
+                        if k.kind != Tok::String && k.kind != Tok::Ident {
+                            return Err(self.err(&k, "expected object key"));
+                        }
+                        self.need(Tok::Colon, "expected ':'")?;
+                        let v = self.expression()?;
+                        xs.push((k.lit, v));
+                        if self.match_kind(Tok::RBrace) {
+                            break;
+                        }
+                        self.need(Tok::Comma, "expected ',' or '}'")?;
+                        if self.match_kind(Tok::RBrace) {
+                            break;
+                        }
+                    }
+                }
+                Ok(Expr::Object(t.pos, xs))
+            }
+            _ => Err(self.err(&t, &format!("unexpected token {:?}", t.lit))),
+        }
+    }
+
+    fn call_args(&mut self) -> Result<Vec<Expr>, Error> {
+        let mut args = Vec::new();
+        if self.match_kind(Tok::RParen) {
+            return Ok(args);
+        }
+        loop {
+            let x = self.expression()?;
+            args.push(x);
+            if self.match_kind(Tok::RParen) {
+                return Ok(args);
+            }
+            self.need(Tok::Comma, "expected ',' or ')'")?;
+        }
+    }
+}
+
+fn prec(k: Tok) -> Option<i32> {
+    match k {
+        Tok::Assign | Tok::PlusAssign | Tok::MinusAssign | Tok::StarAssign | Tok::SlashAssign => {
+            Some(1)
+        }
+        Tok::Or => Some(2),
+        Tok::And => Some(3),
+        Tok::Eq | Tok::Ne => Some(4),
+        Tok::GT | Tok::GE | Tok::LT | Tok::LE => Some(5),
+        Tok::Plus | Tok::Minus => Some(6),
+        Tok::Star | Tok::Slash => Some(7),
+        _ => None,
+    }
+}

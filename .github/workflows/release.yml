@@ -12,63 +12,51 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    env:
-      VERSION: ${{ github.ref_name }}
+    defaults:
+      run:
+        working-directory: rust_version
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Windows x64
             os: windows-latest
-            goos: windows
-            output: dist/jsonsh.exe
-            archive: dist/jsonsh-windows-x64.zip
+            output: target/release/jsonsh.exe
+            archive: jsonsh-windows-x64.zip
             artifact: jsonsh-windows-x64
           - name: Linux x64
             os: ubuntu-latest
-            goos: linux
-            output: dist/jsonsh
-            archive: dist/jsonsh-linux-x64.zip
+            output: target/release/jsonsh
+            archive: jsonsh-linux-x64.zip
             artifact: jsonsh-linux-x64
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run tests
-        run: go test ./...
+        run: cargo test
 
-      - name: Create output directory
-        run: mkdir dist
-
-      - name: Build ${{ matrix.name }}
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: amd64
-        run: go build -trimpath -ldflags "-X main.version=${{ env.VERSION }}" -o "${{ matrix.output }}" ./cmd/jsonsh
+      - name: Build release binary
+        run: cargo build --release
 
       - name: Package Windows x64
-        if: matrix.goos == 'windows'
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: Compress-Archive -LiteralPath "${{ matrix.output }}" -DestinationPath "${{ matrix.archive }}"
 
       - name: Package Linux x64
-        if: matrix.goos == 'linux'
-        working-directory: dist
-        run: zip jsonsh-linux-x64.zip jsonsh
+        if: matrix.os == 'ubuntu-latest'
+        run: zip "${{ matrix.archive }}" "${{ matrix.output }}"
 
       - name: Upload ${{ matrix.name }} artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.archive }}
+          path: rust_version/${{ matrix.archive }}
           if-no-files-found: error
 
   release:

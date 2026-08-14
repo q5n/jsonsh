@@ -1,0 +1,23 @@
+[package]
+name = "jsonsh"
+version = "0.1.0"
+edition = "2021"
+description = "Process JSON/JSONC with JavaScript-like expressions (Rust port)"
+
+[dependencies]
+regex = "1"
+unicode-general-category = "1"
+
+[lib]
+name = "jsonsh"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jsonsh"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
