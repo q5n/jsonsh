@@ -578,6 +578,7 @@ String methods:\n\
 Array methods:\n\
   toString()\n\
   push(value, ...)\n\
+  reverse()\n\
   splice(start[, deleteCount, ...items])\n\
   join([separator])\n\
   indexOf(value[, start])\n\

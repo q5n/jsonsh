@@ -262,6 +262,7 @@ fn language_help() {
         "matchAll(pattern)",
         "replaceAll(pattern, replacement)",
         "splice(start[, deleteCount, ...items])",
+        "reverse()",
         "lastIndexOf(value[, start])",
         "Go regular expressions",
         "typeof(null)",

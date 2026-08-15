@@ -526,7 +526,7 @@ impl<'a> Runtime<'a> {
         if let Value::Array(a) = &recv {
             return self.array_method(p, a, name, &values);
         }
-        if name == "push" || name == "splice" || name == "join" {
+        if name == "push" || name == "splice" || name == "join" || name == "reverse" {
             return Err(self.fail(p, &format!("{} requires an array receiver", name)));
         }
         if let Value::String(s) = &recv {
@@ -845,6 +845,13 @@ impl<'a> Runtime<'a> {
                 items.extend_from_slice(&a[start + delete_count..]);
                 *a = items;
                 Ok(Value::array(removed))
+            }
+            "reverse" => {
+                if !args.is_empty() {
+                    return Err(self.fail(p, "reverse expects no arguments"));
+                }
+                array.borrow_mut().reverse();
+                Ok(Value::Array(array.clone()))
             }
             "indexOf" | "lastIndexOf" => {
                 if args.is_empty() || args.len() > 2 {
