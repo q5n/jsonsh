@@ -103,6 +103,9 @@ impl<'a> Runtime<'a> {
             Stmt::Break(_) => Ok(Some("break")),
             Stmt::Continue(_) => Ok(Some("continue")),
             Stmt::For(p, name, of, source, body) => self.exec_for(*p, name, *of, source, body),
+            Stmt::ForC(p, init, cond, update, body) => {
+                self.exec_for_c(*p, init, cond, update, body)
+            }
         }
     }
 
@@ -134,6 +137,40 @@ impl<'a> Runtime<'a> {
                 Some("continue") => continue,
                 Some(sig) => return Ok(Some(sig)),
                 None => {}
+            }
+        }
+        Ok(None)
+    }
+
+    fn exec_for_c(
+        &mut self,
+        p: Pos,
+        init: &Option<Box<Stmt>>,
+        cond: &Option<Expr>,
+        update: &Option<Expr>,
+        body: &Stmt,
+    ) -> Result<Option<&'static str>, Error> {
+        if let Some(init) = init {
+            self.step(init.pos())?;
+            self.exec(init)?;
+        }
+        loop {
+            self.step(p)?;
+            if let Some(cond) = cond {
+                if !truth(&self.eval(cond)?) {
+                    break;
+                }
+            }
+            match self.exec(body)? {
+                Some("break") => break,
+                Some("continue") => {}
+                Some(sig) => return Ok(Some(sig)),
+                None => {}
+            }
+            if let Some(update) = update {
+                self.step(update.pos())?;
+                let v = self.eval(update)?;
+                self.last = Some(v);
             }
         }
         Ok(None)

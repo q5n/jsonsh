@@ -250,6 +250,7 @@ fn language_help() {
         "Values and literals:",
         "Operators, from lowest",
         "for (value of array)",
+        "for (init; condition; update)",
         "log(value, ...)",
         "env(name)",
         "typeof(value)",

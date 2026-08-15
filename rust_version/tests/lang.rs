@@ -464,6 +464,95 @@ fn for_of_rejects_non_iterable() {
 }
 
 #[test]
+fn c_style_for_counts_and_accepts_empty_parts() {
+    let (root, _, ) = lang::execute(
+        r#"
+        $.out = [];
+        for (i = 0; i < 4; i += 1) {
+            $.out.push(i);
+        }
+        for (j = 0; j < 3; j += 1) {}
+    "#,
+        obj(vec![]),
+        10000,
+    )
+    .unwrap();
+    assert_eq!(
+        root,
+        obj(vec![("out", arr(vec![num(0.0), num(1.0), num(2.0), num(3.0)]))])
+    );
+
+    let (root, _, ) = lang::execute(
+        r#"
+        $.out = [];
+        i = 5;
+        for (; i < 8; i += 1) {
+            $.out.push(i);
+        }
+        for (;;) {
+            if ($.out.length >= 6) { break; }
+            $.out.push(99);
+        }
+    "#,
+        obj(vec![]),
+        10000,
+    )
+    .unwrap();
+    assert_eq!(
+        root,
+        obj(vec![(
+            "out",
+            arr(vec![num(5.0), num(6.0), num(7.0), num(99.0), num(99.0), num(99.0)])
+        )])
+    );
+}
+
+#[test]
+fn c_style_for_continue_still_runs_update() {
+    let (root, _, ) = lang::execute(
+        r#"
+        $.out = [];
+        for (i = 0; i < 5; i += 1) {
+            if (i == 1 || i == 3) { continue; }
+            $.out.push(i);
+        }
+    "#,
+        obj(vec![]),
+        10000,
+    )
+    .unwrap();
+    assert_eq!(
+        root,
+        obj(vec![("out", arr(vec![num(0.0), num(2.0), num(4.0)]))])
+    );
+}
+
+#[test]
+fn c_style_for_empty_condition_is_limited_by_max_steps() {
+    let e = execute("for (;;) {}", Value::Null, 10);
+    match e {
+        Err(err) => assert!(err.to_string().contains("maximum execution steps exceeded")),
+        Ok(_) => panic!("should error"),
+    }
+}
+
+#[test]
+fn c_style_for_syntax_errors() {
+    let cases = vec![
+        ("for (i = 0 i < 2; i += 1) {}", "after for initializer"),
+        ("for (i = 0; i < 2 i += 1) {}", "after for condition"),
+        ("for (i = 0; i < 2; i += 1 {}", "after for update"),
+    ];
+    for (code, want) in cases {
+        let e = execute(code, Value::Null, 100);
+        match e {
+            Err(err) => assert!(err.to_string().contains(want), "{} error={:?}", code, err),
+            Ok(_) => panic!("{} should error", code),
+        }
+    }
+}
+
+#[test]
 fn empty_statements_and_trailing_block_semicolon() {
     let (root, _, ) = lang::execute(
         ";;; { $.a = 1;;; };;;; if (true) { $.b = 2; };;; for (k in $) { break; };;;",
