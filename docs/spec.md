@@ -18,7 +18,7 @@ Operator precedence, from lowest to highest, is: assignment `= += -= *= /=` (rig
 - Equality operators do not convert types. Arrays and objects use recursive deep equality.
 - Ordered comparisons accept either two numbers or two strings.
 - Falsy values are `null`, `false`, numeric zero, and the empty string. Arrays and objects are always truthy. `&&` and `||` short-circuit and return booleans.
-- Multi-level access supports `.name`, `[number]`, and `[string-expression]`. Reading a missing object property returns `null`. Invalid member types, non-integer array indexes, negative indexes, and out-of-range array indexes are errors.
+- Multi-level access supports `.name`, `[number]`, and `[string-expression]`. Reading a missing object property returns `null`. Array indexes must be integers. Negative indexes count from the end (`-1` is the last element); an index whose resolved position is before the start is an error. Reading an index at or beyond `length` returns `null`. Assigning to such an index grows the array to `index + 1`, filling the gap with `null`. Deleting an index at or beyond `length` is a no-op; deleting a valid negative index removes that element and shifts the rest forward.
 
 An assignment target must be a variable or member expression. Compound assignments follow the rules of their corresponding arithmetic operators.
 

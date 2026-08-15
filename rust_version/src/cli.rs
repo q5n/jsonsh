@@ -510,7 +510,9 @@ Variables:\n\
   $ = value               Replace the entire root value\n\
   name = value            Create or update a global variable\n\
   object.name             Access an object property\n\
-  value[key]              Access an object property or array element\n\
+  value[key]              Object property or array element; negative indexes\n\
+                          count from the end, and assigning beyond length\n\
+                          grows the array with null holes\n\
 \n\
 Statements:\n\
   expression;\n\
