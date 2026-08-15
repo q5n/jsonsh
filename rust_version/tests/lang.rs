@@ -1015,6 +1015,96 @@ fn string_index_with_non_string_key_errors() {
 }
 
 #[test]
+fn array_index_out_of_range_reads_null_and_grows_on_assign() {
+    let (r, last) = run(
+        "$.a = [1, 2]; x = $.a[5]; $.a[5] = 6; $.a[3] = 4; [x, $.a.length, $.a];",
+        obj(vec![("a", arr(vec![num(1.0), num(2.0)]))]),
+    );
+    assert_eq!(
+        last,
+        Some(arr(vec![
+            Value::Null,
+            num(6.0),
+            arr(vec![
+                num(1.0),
+                num(2.0),
+                Value::Null,
+                num(4.0),
+                Value::Null,
+                num(6.0),
+            ]),
+        ]))
+    );
+    let _ = r;
+}
+
+#[test]
+fn array_negative_indexes() {
+    let (r, last) = run(
+        "a = [1, 2, 3]; first = a[-3]; last = a[-1]; a[-2] = 20; delete a[-1]; [first, last, a];",
+        Value::Null,
+    );
+    assert_eq!(
+        last,
+        Some(arr(vec![
+            num(1.0),
+            num(3.0),
+            arr(vec![num(1.0), num(20.0)]),
+        ]))
+    );
+    let _ = r;
+}
+
+#[test]
+fn array_negative_index_out_of_bounds_errors() {
+    let root = obj(vec![("a", arr(vec![num(1.0), num(2.0)]))]);
+    for code in ["$.a[-3]", "$.a[-3] = 1", "delete $.a[-3]"] {
+        let e = execute(code, root.deep_clone(), 100);
+        match e {
+            Err(err) => assert!(err.to_string().contains("out of range"), "{} error={:?}", code, err),
+            Ok(_) => panic!("{} should error", code),
+        }
+    }
+}
+
+#[test]
+fn array_delete_out_of_range_is_silent() {
+    let (r, _) = run(
+        "$.a = [1, 2]; delete $.a[99]; $.a;",
+        obj(vec![("a", arr(vec![num(1.0), num(2.0)]))]),
+    );
+    assert_eq!(
+        r,
+        obj(vec![("a", arr(vec![num(1.0), num(2.0)]))])
+    );
+}
+
+#[test]
+fn array_compound_assign_into_hole_reads_null() {
+    let (r, last) = run(
+        "$.a = [1]; $.a[3] = 3; x = $.a[1]; $.a[2] = x; [x, $.a];",
+        obj(vec![("a", arr(vec![num(1.0)]))]),
+    );
+    assert_eq!(
+        last,
+        Some(arr(vec![
+            Value::Null,
+            arr(vec![num(1.0), Value::Null, Value::Null, num(3.0)]),
+        ]))
+    );
+    let _ = r;
+}
+
+#[test]
+fn array_index_invalid_type_errors() {
+    let e = execute("$.a = [1]; $.a[\"x\"];", obj(vec![]), 100);
+    match e {
+        Err(err) => assert!(err.to_string().contains("array index must be an integer")),
+        Ok(_) => panic!("should error"),
+    }
+}
+
+#[test]
 fn chinese_identifiers_and_member_access() {
     let (r, _) = run("$.价格 = 80; $.新字段 = \"中文值\";", obj(vec![]));
     if let Value::Object(o) = &r {

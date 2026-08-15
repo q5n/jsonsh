@@ -308,13 +308,15 @@ impl<'a> Runtime<'a> {
                 if matches!(key, Value::String(k) if k == "length") {
                     return Ok(Value::Number(a.borrow().len() as f64));
                 }
-                let i = match index(key) {
-                    Some(i) => i,
-                    None => return Err(self.fail(p, "array index must be a non-negative integer")),
+                let n = match index(key) {
+                    Some(n) => n,
+                    None => return Err(self.fail(p, "array index must be an integer")),
                 };
                 let a = a.borrow();
-                if i >= a.len() {
-                    return Err(self.fail(p, &format!("array index {} out of range", i)));
+                let len = a.len();
+                let i = resolve_index(p, n, len)?;
+                if i >= len {
+                    return Ok(Value::Null);
                 }
                 Ok(a[i].clone())
             }
@@ -405,10 +407,11 @@ impl<'a> Runtime<'a> {
                 Ok(Ref::ObjField(o.clone(), k, p))
             }
             Value::Array(a) => {
-                let i = match index(key) {
-                    Some(i) => i,
-                    None => return Err(self.fail(p, "array index must be a non-negative integer")),
+                let n = match index(key) {
+                    Some(n) => n,
+                    None => return Err(self.fail(p, "array index must be an integer")),
                 };
+                let i = resolve_index(p, n, a.borrow().len())?;
                 Ok(Ref::ArrElem(a.clone(), i, p))
             }
             _ => Err(self.fail(p, "member access requires array or object")),
@@ -423,10 +426,10 @@ impl<'a> Runtime<'a> {
                 .cloned()
                 .ok_or_else(|| self.fail(*p, &format!("undefined variable {:?}", name))),
             Ref::ObjField(o, k, _) => Ok(o.borrow().get(k).cloned().unwrap_or(Value::Null)),
-            Ref::ArrElem(a, i, p) => {
+            Ref::ArrElem(a, i, _) => {
                 let a = a.borrow();
                 if *i >= a.len() {
-                    Err(self.fail(*p, &format!("array index {} out of range", *i)))
+                    Ok(Value::Null)
                 } else {
                     Ok(a[*i].clone())
                 }
@@ -447,7 +450,10 @@ impl<'a> Runtime<'a> {
             Ref::ArrElem(a, i, p) => {
                 let mut a = a.borrow_mut();
                 if *i >= a.len() {
-                    return Err(self.fail(*p, &format!("array index {} out of range", *i)));
+                    if *i > isize::MAX as usize {
+                        return Err(self.fail(*p, &format!("array index {} out of range", *i)));
+                    }
+                    a.resize(*i + 1, Value::Null);
                 }
                 a[*i] = v;
                 Ok(())
@@ -466,12 +472,11 @@ impl<'a> Runtime<'a> {
                 o.remove(k);
                 Ok(())
             }
-            Ref::ArrElem(a, i, p) => {
+            Ref::ArrElem(a, i, _) => {
                 let mut a = a.borrow_mut();
-                if *i >= a.len() {
-                    return Err(self.fail(*p, &format!("array index {} out of range", *i)));
+                if *i < a.len() {
+                    a.remove(*i);
                 }
-                a.remove(*i);
                 Ok(())
             }
         }
@@ -939,18 +944,35 @@ impl<'a> Runtime<'a> {
     }
 }
 
-fn index(v: &Value) -> Option<usize> {
+fn index(v: &Value) -> Option<i64> {
     match v {
         Value::Number(n) => {
             let n = *n;
-            if n < 0.0 || n.fract() != 0.0 || n > usize::MAX as f64 {
+            if n.is_nan()
+                || n.is_infinite()
+                || n.fract() != 0.0
+                || n < i64::MIN as f64
+                || n > i64::MAX as f64
+            {
                 None
             } else {
-                Some(n as usize)
+                Some(n as i64)
             }
         }
         _ => None,
     }
+}
+
+fn resolve_index(p: Pos, n: i64, len: usize) -> Result<usize, Error> {
+    let i = if n < 0 { len as i64 + n } else { n };
+    if i < 0 {
+        return Err(Error::new(
+            "RuntimeError",
+            p,
+            format!("array index {} out of range", n),
+        ));
+    }
+    Ok(i as usize)
 }
 
 fn integer_arg(v: &Value) -> Option<i64> {
@@ -1026,7 +1048,7 @@ fn truth(v: &Value) -> bool {
 fn exists(v: &Value, key: &Value) -> bool {
     match v {
         Value::Array(a) => match index(key) {
-            Some(i) => i < a.borrow().len(),
+            Some(i) => i >= 0 && (i as usize) < a.borrow().len(),
             None => false,
         },
         Value::Object(o) => match key {
