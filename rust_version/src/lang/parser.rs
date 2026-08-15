@@ -182,21 +182,61 @@ impl Parser {
     fn for_stmt(&mut self) -> Result<Stmt, Error> {
         let t = self.next();
         self.need(Tok::LParen, "expected '(' after for")?;
-        let n = self.need(Tok::Ident, "expected loop variable")?;
-        let of = if self.match_kind(Tok::In) {
-            false
-        } else if self.match_kind(Tok::Of) {
-            true
+        if self.match_kind(Tok::Semi) {
+            return self.for_c_stmt(t.pos, None);
+        }
+        let next_is_in_of = self.peek().kind == Tok::Ident
+            && self
+                .ts
+                .get(self.i + 1)
+                .map(|x| x.kind == Tok::In || x.kind == Tok::Of)
+                .unwrap_or(false);
+        if next_is_in_of {
+            let n = self.need(Tok::Ident, "expected loop variable")?;
+            let of = if self.match_kind(Tok::In) {
+                false
+            } else if self.match_kind(Tok::Of) {
+                true
+            } else {
+                return Err(self.err(self.peek(), "expected 'in' or 'of'"));
+            };
+            let src = self.expression()?;
+            self.need(Tok::RParen, "expected ')' after source")?;
+            self.loops += 1;
+            let b = self.block();
+            self.loops -= 1;
+            let b = b?;
+            return Ok(Stmt::For(t.pos, n.lit, of, src, Box::new(b)));
+        }
+        let init = self.expression()?;
+        self.need(Tok::Semi, "expected ';' after for initializer")?;
+        self.for_c_stmt(t.pos, Some(Stmt::Expr(init.pos(), init)))
+    }
+
+    fn for_c_stmt(&mut self, pos: Pos, init: Option<Stmt>) -> Result<Stmt, Error> {
+        let cond = if self.peek().kind == Tok::Semi {
+            None
         } else {
-            return Err(self.err(self.peek(), "expected 'in' or 'of'"));
+            Some(self.expression()?)
         };
-        let src = self.expression()?;
-        self.need(Tok::RParen, "expected ')' after source")?;
+        self.need(Tok::Semi, "expected ';' after for condition")?;
+        let update = if self.peek().kind == Tok::RParen {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.need(Tok::RParen, "expected ')' after for update")?;
         self.loops += 1;
         let b = self.block();
         self.loops -= 1;
         let b = b?;
-        Ok(Stmt::For(t.pos, n.lit, of, src, Box::new(b)))
+        Ok(Stmt::ForC(
+            pos,
+            init.map(Box::new),
+            cond,
+            update,
+            Box::new(b),
+        ))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {

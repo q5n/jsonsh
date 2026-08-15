@@ -2,7 +2,7 @@
 
 ## Goal
 
-`jsonsh` is a dependency-free command-line tool written in Go. It reads a JSONC value, binds it to the predefined global variable `$`, executes a JavaScript-like script, and outputs either the modified `$` value or the result of the last expression. JSONC input extends standard JSON with line comments, block comments, and trailing commas. The scripting language is intentionally small and does not claim JavaScript compatibility.
+`jsonsh` is a dependency-light command-line tool written in Rust. It reads a JSONC value, binds it to the predefined global variable `$`, executes a JavaScript-like script, and outputs either the modified `$` value or the result of the last expression. JSONC input extends standard JSON with line comments, block comments, and trailing commas. The scripting language is intentionally small and does not claim JavaScript compatibility.
 
 ## Data types and variables
 
@@ -32,12 +32,15 @@ for (key in object) { ... }
 for (index in array) { ... }
 for (value of array) { ... }
 for (character of string) { ... }
+for (initializer; condition; update) { ... }
 delete object.member;
 break;
 continue;
 ```
 
 `for..in` iterates over numeric array indexes or object keys in lexicographic order. A key snapshot is created when the loop starts, and members deleted before their turn are skipped. `for..of` iterates over array values or Unicode code points in a string. Its source expression is evaluated once. Array iteration is live: each iteration reads the current length and current element, so `splice`, deletion, and `push` affect later iterations. Loop variables live in global scope. `break` and `continue` apply only to the nearest enclosing loop and are errors outside a loop. Deleting an array element shifts subsequent elements toward the beginning. Deleting a missing member is an error. Regular variables and `$` cannot be deleted. Empty statements are allowed, including repeated semicolons and semicolons following blocks.
+
+The traditional `for (initializer; condition; update) { ... }` loop evaluates the optional initializer once before the loop. Each iteration evaluates the optional condition; an omitted condition is `true`. The body runs only when the condition is truthy. After a normal body completion or `continue`, the optional update expression runs before the next condition check. `break` exits without running the update. The initializer and update are single expressions such as `i = 0` or `i += 1`; block declarations (`let`/`var`), comma expressions, postfix `++`/`--`, and brace-less bodies are not supported.
 
 ## Built-in functions and methods
 
@@ -74,4 +77,4 @@ jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
 
 When `INPUT` is omitted, input is read from standard input if it is redirected or piped; otherwise `$` is initialized to `null`. `-e` and `-f`, `-o` and `-i`, and `-p` and `-c` are mutually exclusive. `-i` requires an input file. The default mode applies minimal changes and preserves the original source structure. `--pretty` reformats while retaining comments. `--compact` emits comment-free standard JSON. In-place writes first create a temporary file in the same directory and replace the input only after the output has been written and closed successfully. See [jsonc-preserve.md](jsonc-preserve.md) for details.
 
-Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. An explicitly empty expression (`-e ""`) performs no mutations and outputs the root value in the selected output mode. Function definitions, `return`, `while`, traditional `for`, increment operators, modulo, ternary expressions, slicing, and JavaScript standard objects are not supported yet.
+Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. An explicitly empty expression (`-e ""`) performs no mutations and outputs the root value in the selected output mode. Function definitions, `return`, `while`, increment operators, modulo, ternary expressions, slicing, and JavaScript standard objects are not supported yet.

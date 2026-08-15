@@ -520,6 +520,7 @@ Statements:\n\
   for (index in array) {{ ... }}\n\
   for (value of array) {{ ... }}\n\
   for (character of string) {{ ... }}\n\
+  for (init; condition; update) {{ ... }}\n\
   delete object.member;\n\
   break;\n\
   continue;\n\
