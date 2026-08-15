@@ -1,11 +1,6 @@
 # jsonsh
 
-`jsonsh` is a lightweight JSON/JSONC scripting tool. The root value is available through `$`. It does not embed or invoke a JavaScript engine. Input files may contain `//` line comments, `/* ... */` block comments, and trailing commas.
-
-Two behaviorally identical implementations are provided:
-
-- **Go** — pure Go, zero third-party dependencies, in [`go_version/`](go_version/).
-- **Rust** — in [`rust_version/`](rust_version/), depending only on `regex` and `unicode-general-category`.
+`jsonsh` is a lightweight JSON/JSONC scripting tool. The root value is available through `$`. It does not embed or invoke a JavaScript engine. Input files may contain `//` line comments, `/* ... */` block comments, and trailing commas. It is implemented in Rust in [`rust_version/`](rust_version/), depending only on `regex` and `unicode-general-category`.
 
 ```bash
 jsonsh -e '$.price *= 0.8' input.json
@@ -41,6 +36,13 @@ $.users.push({name: "Tom"});
 newLength = $.tags.push("go", "json");
 ```
 
+Use `reverse()` to reverse the elements of an array in place. It returns the same array reference, so it can be chained:
+
+```js
+$.users.reverse();
+topThree = $.tags.reverse().join(", ");
+```
+
 You can also replace the entire JSON root value:
 
 ```js
@@ -59,8 +61,6 @@ $.ready = true
 
 ## Build and test
 
-### Rust version (`rust_version/`)
-
 ```bash
 cd rust_version
 cargo test                   # run all tests
@@ -71,26 +71,6 @@ The release profile strips symbols and enables LTO (`strip = true`, `lto = true`
 `codegen-units = 1`, `panic = "abort"`), producing a small, dependency-free binary.
 The version comes from the `version` field in `Cargo.toml` (baked in at compile time
 via `CARGO_PKG_VERSION`).
-
-### Go version (`go_version/`)
-
-```bash
-cd go_version
-go build ./cmd/jsonsh        # build to go_version/jsonsh(.exe)
-go test ./...                # run all tests
-go vet ./...                 # static analysis
-```
-
-On Linux Bash or Windows Git Bash/MSYS, use the build script. It runs the test
-suite and builds to `go_version/dist/jsonsh` (or `.exe`), injecting the version
-via `-ldflags "-X main.version=..."` (derived from Git by default):
-
-```bash
-cd go_version
-bash ./build-go.sh
-bash ./build-go.sh --skip-tests
-bash ./build-go.sh --version v0.2.1
-```
 
 To view the complete command-line help:
 
@@ -110,4 +90,4 @@ To display the built-in scripting language reference:
 jsonsh --syntax
 ```
 
-See [go_version/docs/spec.md](go_version/docs/spec.md) for the complete language semantics, built-in functions, and command-line options.
+See [docs/spec.md](docs/spec.md) for the complete language semantics, built-in functions, and command-line options.

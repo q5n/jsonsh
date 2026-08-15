@@ -1,7 +1,5 @@
 /jsonsh
 /jsonsh.exe
-*.test
-go_version/dist/
 /dist/
 .codegraph/
 *.exe
