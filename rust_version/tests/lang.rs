@@ -227,6 +227,74 @@ fn array_push_errors() {
 }
 
 #[test]
+fn array_reverse_reverses_in_place_and_returns_same_array() {
+    let (r, last) = run(
+        "items=$.items; result=items.reverse(); result.push(4); [items.length, result.length, items];",
+        obj(vec![("items", arr(vec![num(1.0), num(2.0), num(3.0)]))]),
+    );
+    assert_eq!(
+        last,
+        Some(arr(vec![
+            num(4.0),
+            num(4.0),
+            arr(vec![num(3.0), num(2.0), num(1.0), num(4.0)]),
+        ]))
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        if let Some(Value::Array(items)) = m.get("items") {
+            let items = items.borrow();
+            assert_eq!(&*items, &[num(3.0), num(2.0), num(1.0), num(4.0)]);
+        }
+    }
+}
+
+#[test]
+fn array_reverse_chains_with_join() {
+    let (_, last) = run(
+        "$.tags.reverse().join(\", \");",
+        obj(vec![("tags", arr(vec![s("a"), s("b"), s("c")]))]),
+    );
+    assert_eq!(last, Some(s("c, b, a")));
+}
+
+#[test]
+fn array_reverse_empty_and_single() {
+    let (empty, _) = run(
+        "$ = {items: []}; $.items.reverse(); $;",
+        obj(vec![("items", arr(vec![num(1.0)]))]),
+    );
+    if let Value::Object(o) = &empty {
+        if let Some(Value::Array(items)) = o.borrow().get("items") {
+            assert!(items.borrow().is_empty());
+        }
+    }
+
+    let (single, _) = run("$ = {items: [42]}; $.items.reverse(); $;", Value::Null);
+    if let Value::Object(o) = &single {
+        if let Some(Value::Array(items)) = o.borrow().get("items") {
+            assert_eq!(&*items.borrow(), &[num(42.0)]);
+        }
+    }
+}
+
+#[test]
+fn array_reverse_errors() {
+    let cases = vec![
+        ("$.items.reverse(1);", "no arguments"),
+        ("$.name.reverse();", "array receiver"),
+    ];
+    let root = obj(vec![("items", arr(vec![num(1.0)])), ("name", s("x"))]);
+    for (code, want) in cases {
+        let e = execute(code, root.deep_clone(), 100);
+        match e {
+            Err(err) => assert!(err.to_string().contains(want), "{} error={:?}", code, err),
+            Ok(_) => panic!("{} should error", code),
+        }
+    }
+}
+
+#[test]
 fn root_can_be_assigned_directly() {
     let (r, last) = run(
         "$ = {items: [1]}; $.items.push(2); $;",
