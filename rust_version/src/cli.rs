@@ -528,6 +528,9 @@ Statements:\n\
   Statements are separated by semicolons or line breaks. Repeated semicolons\n\
   and semicolons after blocks are allowed. Expressions may continue across\n\
   lines when syntactically incomplete. Control-flow bodies must use braces.\n\
+  In a traditional for loop, init, condition, and update are each optional;\n\
+  an omitted condition loops forever (subject to --max-steps). continue runs\n\
+  update before the next iteration; break exits without running update.\n\
 \n\
 Operators, from lowest to highest precedence:\n\
   =  +=  -=  *=  /=\n\
