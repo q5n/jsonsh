@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
+use crate::regex::Regex;
 use unicode_general_category::get_general_category;
 use unicode_general_category::GeneralCategory::*;
 
@@ -28,6 +29,7 @@ pub enum Builtin {
     Log,
     Env,
     Keys,
+    RegExp,
 }
 
 #[derive(Clone)]
@@ -55,6 +57,7 @@ pub enum Value {
     Object(Rc<RefCell<BTreeMap<String, Value>>>),
     Function(Rc<Function>),
     Builtin(Builtin),
+    Regex(Rc<Regex>),
 }
 
 impl PartialEq for Value {
@@ -70,6 +73,10 @@ impl PartialEq for Value {
             }
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
             (Value::Builtin(a), Value::Builtin(b)) => a == b,
+            (Value::Regex(a), Value::Regex(b)) => {
+                Rc::ptr_eq(a, b)
+                    || (a.source() == b.source() && a.flags() == b.flags())
+            }
             _ => false,
         }
     }
@@ -104,6 +111,10 @@ impl Value {
         Value::Builtin(b)
     }
 
+    pub fn regex(re: Regex) -> Value {
+        Value::Regex(Rc::new(re))
+    }
+
     /// Deep copy: allocates fresh aggregate containers so that mutating the
     /// result never affects the source value (mirrors jsonc.Clone + importValue).
     /// Function values are shared by reference (their captured environment has
@@ -123,6 +134,7 @@ impl Value {
             ),
             Value::Function(f) => Value::Function(f.clone()),
             Value::Builtin(b) => Value::Builtin(*b),
+            Value::Regex(r) => Value::Regex(r.clone()),
         }
     }
 }

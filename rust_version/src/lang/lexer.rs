@@ -20,26 +20,28 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
     loop {
         l.skip_space()?;
         let p = l.pos();
+        let offset = l.off;
         if l.off >= l.src.len() {
             out.push(Token {
                 kind: Tok::Eof,
                 lit: String::new(),
                 pos: p,
+                offset: l.src.len(),
             });
             return Ok(out);
         }
         let r = l.src[l.off..].chars().next().unwrap();
         if is_letter(r) || r == '_' {
-            out.push(l.ident());
+            out.push(l.ident(offset));
             continue;
         }
         if is_digit(r) {
-            let t = l.number()?;
+            let t = l.number(offset)?;
             out.push(t);
             continue;
         }
         if r == '\'' || r == '"' {
-            let t = l.str()?;
+            let t = l.str(offset)?;
             out.push(t);
             continue;
         }
@@ -63,6 +65,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
                     kind: *k,
                     lit: String::from_utf8_lossy(two).into_owned(),
                     pos: p,
+                    offset,
                 });
                 l.advance();
                 l.advance();
@@ -103,15 +106,20 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
                 kind: k,
                 lit: r.to_string(),
                 pos: p,
+                offset,
             });
             l.advance();
             continue;
         }
-        return Err(Error::new(
-            "LexError",
-            p,
-            format!("unexpected character {:?}", r),
-        ));
+        // Any other character becomes a Char token so that regex literal bodies
+        // (e.g. ?, |, ^, %) do not break lexing before the parser scans them.
+        out.push(Token {
+            kind: Tok::Char(r),
+            lit: r.to_string(),
+            pos: p,
+            offset,
+        });
+        l.advance();
     }
 }
 
@@ -168,8 +176,9 @@ impl Lexer {
         Ok(())
     }
 
-    fn ident(&mut self) -> Token {
-        let (p, start) = (self.pos(), self.off);
+    fn ident(&mut self, offset: usize) -> Token {
+        let p = self.pos();
+        let start = self.off;
         while self.off < self.src.len() {
             let r = self.src[self.off..].chars().next().unwrap();
             if !is_letter(r) && !is_digit(r) && r != '_' {
@@ -195,17 +204,19 @@ impl Lexer {
             _ => None,
         };
         match kw {
-            Some(k) => Token { kind: k, lit: s, pos: p },
+            Some(k) => Token { kind: k, lit: s, pos: p, offset },
             None => Token {
                 kind: Tok::Ident,
                 lit: s,
                 pos: p,
+                offset,
             },
         }
     }
 
-    fn number(&mut self) -> Result<Token, Error> {
-        let (p, start) = (self.pos(), self.off);
+    fn number(&mut self, offset: usize) -> Result<Token, Error> {
+        let p = self.pos();
+        let start = self.off;
         let digits = |l: &mut Lexer| {
             while l.off < l.src.len() && l.src.as_bytes()[l.off].is_ascii_digit() {
                 l.advance();
@@ -235,10 +246,11 @@ impl Lexer {
             kind: Tok::Number,
             lit: s,
             pos: p,
+            offset,
         })
     }
 
-    fn str(&mut self) -> Result<Token, Error> {
+    fn str(&mut self, offset: usize) -> Result<Token, Error> {
         let p = self.pos();
         let quote = self.advance();
         let mut b = String::new();
@@ -249,6 +261,7 @@ impl Lexer {
                     kind: Tok::String,
                     lit: b,
                     pos: p,
+                    offset,
                 });
             }
             if r == '\n' || r == '\r' {

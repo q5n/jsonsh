@@ -5,14 +5,7 @@ edition = "2021"
 description = "Process JSON/JSONC with JavaScript-like expressions (Rust port)"
 
 [dependencies]
-regex = { version = "1", default-features = false, features = [
-    "std",
-    "perf",
-    "unicode-gencat",
-    "unicode-script",
-    "unicode-case",
-    "unicode-perl",
-] }
+caseless = "0.2"
 unicode-general-category = "1"
 
 [lib]
