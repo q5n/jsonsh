@@ -571,7 +571,7 @@ fn additional_string_methods() {
 		$.last = "a😀a😀".lastIndexOf("😀");
 		$.lastFrom = "a😀a😀".lastIndexOf("😀", 2);
 		$.compare = ["a".localeCompare("b"), "b".localeCompare("b"), "c".localeCompare("b")];
-		$.split = "a, b;c".split("[,;]\\s*");
+		$.split = "a, b;c".split(/[,;]\s*/);
 		$.limited = "a,b,c".split(",", 2);
 	"#,
         obj(vec![]),
@@ -593,7 +593,7 @@ fn regexp_match_and_replace_methods() {
 		$.match = "id-42".match("([a-z]+)-(\\d+)");
 		$.missing = "abc".match("\\d+");
 		$.optional = "b".match("(a)?b");
-		$.all = "a1 b22".matchAll("([a-z])(\\d+)");
+		$.all = "a1 b22".matchAll(/([a-z])(\d+)/g);
 		$.first = "a1 a2".replace("a(\\d)", "x$1");
 		$.every = "a1 a2".replaceAll("a(\\d)", "x$1");
 	"#,
@@ -919,7 +919,7 @@ fn string_comparison_operators() {
 
 #[test]
 fn matchall_with_no_matches_returns_empty_array() {
-    let (r, _) = run("$.m = \"abc\".matchAll(\"\\\\d+\");", obj(vec![]));
+    let (r, _) = run("$.m = \"abc\".matchAll(/\\d+/g);", obj(vec![]));
     if let Value::Object(o) = &r {
         assert_eq!(o.borrow().get("m"), Some(&arr(vec![])));
     }
@@ -1719,4 +1719,149 @@ fn builtin_function_is_truthy() {
 fn arrow_multiple_params_and_string_concat() {
     let (_, last) = run("greet = (name, age) => name + ':' + age; greet('Tom', 30)", obj(vec![]));
     assert_eq!(last, Some(s("Tom:30")));
+}
+
+#[test]
+fn regex_literals_and_regexp_constructor() {
+    let (r, _) = run(
+        r#"
+		$.lit = /\d+/g.source;
+		$.flags = /a/im.flags;
+		$.g = /a/g.global;
+		$.i = /a/i.ignoreCase;
+		$.m = /a/m.multiline;
+		$.made = RegExp("\\d+", "g").source;
+	"#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("lit", s("\\d+")),
+        ("flags", s("im")),
+        ("g", Value::Bool(true)),
+        ("i", Value::Bool(true)),
+        ("m", Value::Bool(true)),
+        ("made", s("\\d+")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn regex_test_and_exec() {
+    let (r, _) = run(
+        r#"
+		$.t = /[a-z]+/.test("abc");
+		$.f = /\d+/.test("abc");
+		$.e = /(\w+)-(\d+)/.exec("id-42");
+		$.none = /z/.exec("abc");
+	"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("t"), Some(&Value::Bool(true)));
+        assert_eq!(m.get("f"), Some(&Value::Bool(false)));
+        assert_eq!(m.get("none"), Some(&Value::Null));
+        if let Some(Value::Object(e)) = m.get("e") {
+            let em = e.borrow();
+            assert_eq!(em.get("0"), Some(&s("id-42")));
+            assert_eq!(em.get("1"), Some(&s("id")));
+            assert_eq!(em.get("2"), Some(&s("42")));
+            assert_eq!(em.get("index"), Some(&num(0.0)));
+            assert_eq!(em.get("input"), Some(&s("id-42")));
+        } else {
+            panic!("exec result missing");
+        }
+    } else {
+        panic!("root not object");
+    }
+}
+
+#[test]
+fn regex_string_methods() {
+    let (r, _) = run(
+        r#"
+		$.m1 = "id-42".match(/([a-z]+)-(\d+)/);
+		$.m2 = "a1 a2".match(/a(\d)/g);
+		$.r1 = "a1 a2".replace(/a(\d)/, "x$1");
+		$.r2 = "a1 a2".replaceAll(/a(\d)/g, "x$1");
+		$.s = "a, b;c".split(/[,;]\s*/);
+		$.scap = "a-b-c".split(/(-)/);
+	"#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("m1", arr(vec![s("id-42"), s("id"), s("42")])),
+        ("m2", arr(vec![s("a1"), s("a2")])),
+        ("r1", s("x1 a2")),
+        ("r2", s("x1 x2")),
+        ("s", arr(vec![s("a"), s("b"), s("c")])),
+        (
+            "scap",
+            arr(vec![s("a"), s("-"), s("b"), s("-"), s("c")]),
+        ),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn regex_replacement_expansion() {
+    let (r, _) = run(
+        r#"$.a = "ab".replace(/b/, "[$&][$`][$']");"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&s("a[b][a][]")));
+    } else {
+        panic!("root not object");
+    }
+}
+
+#[test]
+fn regex_division_disambiguation() {
+    let (r, _) = run(
+        r#"$.div = 10 / 2 / 1; $.lit = /a/g.source;"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("div"), Some(&num(5.0)));
+        assert_eq!(m.get("lit"), Some(&s("a")));
+    } else {
+        panic!("root not object");
+    }
+}
+
+#[test]
+fn regex_invalid_pattern_errors() {
+    let cases = vec![
+        ("/[/;", "unterminated"),
+        ("RegExp(\"(\");", "unterminated"),
+        ("RegExp(\"a\", \"x\");", "invalid regex flag"),
+        ("\"x\".matchAll(/a/);", "g flag"),
+        ("\"x\".replaceAll(/a/, \"b\");", "g flag"),
+        ("\"x\".matchAll(\"a\");", "requires a regular expression"),
+    ];
+    for (code, want) in cases {
+        let e = execute(code, obj(vec![]), 100);
+        match e {
+            Err(err) => assert!(err.to_string().contains(want), "{} error={:?}", code, err),
+            Ok(_) => panic!("{} should error", code),
+        }
+    }
+}
+
+#[test]
+fn regex_case_insensitive_and_multiline() {
+    let (r, _) = run(
+        r#"$.ci = /abc/i.test("ABC"); $.m = /^b/m.test("a\nb"); $.nm = /^b/.test("a\nb");"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("ci"), Some(&Value::Bool(true)));
+        assert_eq!(m.get("m"), Some(&Value::Bool(true)));
+        assert_eq!(m.get("nm"), Some(&Value::Bool(false)));
+    } else {
+        panic!("root not object");
+    }
 }

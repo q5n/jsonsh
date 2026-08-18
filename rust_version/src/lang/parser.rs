@@ -4,6 +4,7 @@ use super::ast::{ArrowBody, Expr, Program, Stmt};
 use super::token::{Error, Pos, Tok, Token};
 
 struct Parser {
+    src: String,
     ts: Vec<Token>,
     i: usize,
     loops: usize,
@@ -11,7 +12,12 @@ struct Parser {
 
 pub fn parse(src: &str) -> Result<Program, Error> {
     let ts = super::lexer::lex(src)?;
-    let mut p = Parser { ts, i: 0, loops: 0 };
+    let mut p = Parser {
+        src: src.to_string(),
+        ts,
+        i: 0,
+        loops: 0,
+    };
     let mut list = Vec::new();
     while p.peek().kind != Tok::Eof {
         if p.match_kind(Tok::Semi) {
@@ -29,13 +35,11 @@ impl Parser {
     }
 
     fn next(&mut self) -> Token {
-        let t = self.ts[self.i].kind;
-        let lit = self.ts[self.i].lit.clone();
-        let pos = self.ts[self.i].pos;
+        let t = self.ts[self.i].clone();
         if self.i < self.ts.len() - 1 {
             self.i += 1;
         }
-        Token { kind: t, lit, pos }
+        t
     }
 
     fn match_kind(&mut self, k: Tok) -> bool {
@@ -161,6 +165,7 @@ impl Parser {
                 kind: Tok::Eof,
                 lit: String::new(),
                 pos: Pos { line: 0, col: 0 },
+                offset: 0,
             });
         let mut xs = Vec::new();
         while self.peek().kind != Tok::RBrace {
@@ -354,6 +359,61 @@ impl Parser {
         Ok(x)
     }
 
+    fn regex_literal(
+        &mut self,
+        start: usize,
+        pos: Pos,
+    ) -> Result<Expr, Error> {
+        let bytes = self.src.as_bytes();
+        let mut i = start + 1;
+        let mut in_class = false;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if in_class {
+                if b == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if b == b']' {
+                    in_class = false;
+                }
+                i += 1;
+            } else {
+                if b == b'/' {
+                    break;
+                }
+                if b == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if b == b'[' {
+                    in_class = true;
+                }
+                if b == b'\n' || b == b'\r' {
+                    return Err(self.err_pos(pos, "unterminated regular expression"));
+                }
+                i += 1;
+            }
+        }
+        if i >= bytes.len() {
+            return Err(self.err_pos(pos, "unterminated regular expression"));
+        }
+        let pattern = &self.src[start + 1..i];
+        let mut flags = String::new();
+        let mut j = i + 1;
+        while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+            flags.push(bytes[j] as char);
+            j += 1;
+        }
+        let end = j;
+        while self.i < self.ts.len() && self.ts[self.i].offset < end {
+            self.i += 1;
+        }
+        let re = crate::regex::Regex::new(pattern, &flags)
+            .map_err(|e| self.err_pos(pos, &e))?;
+        Ok(Expr::Literal(pos, Value::regex(re)))
+    }
+
     fn primary(&mut self) -> Result<Expr, Error> {
         let t = self.next();
         match t.kind {
@@ -366,6 +426,11 @@ impl Parser {
             Tok::False => Ok(Expr::Literal(t.pos, Value::Bool(false))),
             Tok::Null => Ok(Expr::Literal(t.pos, Value::Null)),
             Tok::Dollar => Ok(Expr::Variable(t.pos, "$".to_string())),
+            Tok::Slash => self.regex_literal(t.offset, t.pos),
+            Tok::Char(c) => Err(self.err(
+                &t,
+                &format!("unexpected character {:?}", c),
+            )),
             Tok::Ident => {
                 if self.peek().kind == Tok::Arrow {
                     self.need(Tok::Arrow, "expected '=>'")?;

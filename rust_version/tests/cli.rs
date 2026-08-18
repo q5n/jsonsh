@@ -265,7 +265,12 @@ fn language_help() {
         "splice(start[, deleteCount, ...items])",
         "reverse()",
         "lastIndexOf(value[, start])",
-        "Go regular expressions",
+        "ES5 regex literal",
+        "RegExp(pattern, flags?)",
+        "re.test(str)",
+        "re.exec(str)",
+        "re.source, re.flags",
+        "UTF-16 code-unit semantics",
         "typeof(null)",
     ] {
         assert!(text.contains(want), "missing {}", want);

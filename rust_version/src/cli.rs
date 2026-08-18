@@ -592,10 +592,24 @@ String methods:\n\
   replace(pattern, replacement)\n\
   replaceAll(pattern, replacement)\n\
 \n\
-  Pattern arguments are strings containing Go regular expressions, not\n\
-  JavaScript /pattern/flags literals. Replacement strings use Go expansion\n\
-  syntax such as $1. match() returns the full match and capture groups, or null;\n\
-  matchAll() returns an array of match arrays.\n\
+Regular expressions:\n\
+  /pattern/flags             ES5 regex literal; flags are g, i, m\n\
+  RegExp(pattern, flags?)    Construct a regex from a string\n\
+  re.test(str)               Return true if re matches str\n\
+  re.exec(str)               Return a match object or null\n\
+  re.source, re.flags        Read-only regex properties\n\
+  re.global, re.ignoreCase, re.multiline\n\
+\n\
+  match() returns the full match and capture groups, or null; with the g flag\n\
+  it returns an array of full-match strings. matchAll() requires a regex with\n\
+  the g flag. replace()/replaceAll() accept a string pattern (converted to a\n\
+  regex) or a regex; replacement strings use $$ $& $' $` $n. split() treats a\n\
+  string pattern as a literal separator and a regex pattern as a regex (with\n\
+  captured groups inserted into the result).\n\
+\n\
+  Note: regex matching uses UTF-16 code-unit semantics. Rust strings cannot\n\
+  represent lone surrogates, so match boundaries that would split a surrogate\n\
+  pair are rounded to the nearest valid UTF-8 character boundary.\n\
 \n\
 Array methods:\n\
   toString()\n\

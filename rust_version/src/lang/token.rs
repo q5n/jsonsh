@@ -35,6 +35,7 @@ pub enum Tok {
     Ident,
     Number,
     String,
+    Char(char),
     Dollar,
     True,
     False,
@@ -85,4 +86,5 @@ pub struct Token {
     pub kind: Tok,
     pub lit: String,
     pub pos: Pos,
+    pub offset: usize,
 }

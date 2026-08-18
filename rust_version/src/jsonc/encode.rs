@@ -42,7 +42,7 @@ fn append_json(dst: &mut String, v: &Value) -> Result<(), String> {
             }
             dst.push('}');
         }
-        Value::Function(_) | Value::Builtin(_) => dst.push_str("null"),
+        Value::Function(_) | Value::Builtin(_) | Value::Regex(_) => dst.push_str("null"),
     }
     Ok(())
 }

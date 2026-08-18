@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::rc::Rc;
 
-use regex::Regex;
-
 use crate::jsonc;
 use crate::value::{Builtin, Function, Value};
 
@@ -87,6 +85,10 @@ impl<'a> Runtime<'a> {
             .vars
             .borrow_mut()
             .insert("keys".to_string(), Value::builtin(Builtin::Keys));
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("RegExp".to_string(), Value::builtin(Builtin::RegExp));
         Runtime {
             scope: root_env.clone(),
             root: root_env,
@@ -406,6 +408,20 @@ impl<'a> Runtime<'a> {
                 }
                 Ok(a[i].clone())
             }
+            Value::Regex(re) => {
+                let k = match key {
+                    Value::String(k) => k,
+                    _ => return Err(self.fail(p, "regex property key must be string")),
+                };
+                match k.as_str() {
+                    "source" => Ok(Value::String(re.source().to_string())),
+                    "flags" => Ok(Value::String(re.flags().to_string())),
+                    "global" => Ok(Value::Bool(re.flags().global)),
+                    "ignoreCase" => Ok(Value::Bool(re.flags().ignore_case)),
+                    "multiline" => Ok(Value::Bool(re.flags().multiline)),
+                    _ => Err(self.fail(p, &format!("regex property {:?} does not exist", k))),
+                }
+            }
             _ => Err(self.fail(p, "member access requires array or object")),
         }
     }
@@ -676,6 +692,22 @@ impl<'a> Runtime<'a> {
                     _ => Err(self.fail(p, "keys requires array or object")),
                 }
             }
+            Builtin::RegExp => {
+                if values.is_empty() || values.len() > 2 {
+                    return Err(self.fail(p, "RegExp expects 1 or 2 arguments"));
+                }
+                let pattern = match &values[0] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err(self.fail(p, "RegExp pattern must be a string")),
+                };
+                let flags = values.get(1).map(|v| match v {
+                    Value::String(s) => Ok(s.clone()),
+                    _ => Err(self.fail(p, "RegExp flags must be a string")),
+                }).unwrap_or(Ok(String::new()))?;
+                let re = crate::regex::Regex::new(&pattern, &flags)
+                    .map_err(|e| self.fail(p, &format!("invalid regular expression: {}", e)))?;
+                Ok(Value::regex(re))
+            }
         }
     }
 
@@ -709,6 +741,9 @@ impl<'a> Runtime<'a> {
         }
         if name == "push" || name == "splice" || name == "join" || name == "reverse" {
             return Err(self.fail(p, &format!("{} requires an array receiver", name)));
+        }
+        if let Value::Regex(re) = &recv {
+            return self.regex_method(p, re, name, &values);
         }
         if let Value::String(s) = &recv {
             return self.string_method(p, s, name, &values);
@@ -893,65 +928,143 @@ impl<'a> Runtime<'a> {
                 &format!("{} expects {} or {} arguments", name, min_args, max_args),
             ));
         }
-        let pattern = match &args[0] {
-            Value::String(s) => s.clone(),
-            _ => return Err(self.fail(p, &format!("{} pattern must be a string", name))),
-        };
-        let re = Regex::new(&pattern)
-            .map_err(|e| self.fail(p, &format!("invalid regular expression: {}", e)))?;
+
         match name {
             "split" => {
-                let mut limit: i64 = -1;
+                let mut limit: Option<usize> = None;
                 if args.len() == 2 {
-                    limit = integer_arg(&args[1]).ok_or_else(|| {
-                        self.fail(p, "split limit must be a non-negative integer")
-                    })?;
-                    if limit < 0 {
+                    let n = integer_arg(&args[1])
+                        .ok_or_else(|| self.fail(p, "split limit must be a non-negative integer"))?;
+                    if n < 0 {
                         return Err(self.fail(p, "split limit must be a non-negative integer"));
                     }
+                    limit = Some(n as usize);
                 }
-                let mut parts = re_split_all(&re, s);
-                if limit >= 0 && parts.len() as i64 > limit {
-                    parts.truncate(limit as usize);
-                }
+                let parts = match &args[0] {
+                    Value::String(sep) => literal_split(s, sep, limit),
+                    Value::Regex(re) => re.split(s, limit).map_err(|e| self.fail(p, &e))?,
+                    _ => return Err(self.fail(p, "split pattern must be a string or regex")),
+                };
                 Ok(Value::array(parts.into_iter().map(Value::String).collect()))
             }
-            "match" => match find_submatch_index(&re, s) {
-                None => Ok(Value::Null),
-                Some(indexes) => Ok(regexp_match_value(s, &indexes)),
-            },
-            "matchAll" => {
-                let items = re
-                    .captures_iter(s)
-                    .map(|caps| regexp_match_value(s, &captures_to_indexes(&caps)))
-                    .collect();
-                Ok(Value::array(items))
-            }
-            "replace" | "replaceAll" => {
-                let replacement = match &args[1] {
-                    Value::String(s) => s.clone(),
-                    _ => return Err(self.fail(p, &format!("{} replacement must be a string", name))),
+            "match" => {
+                let re = match &args[0] {
+                    Value::String(pat) => crate::regex::Regex::new(pat, "")
+                        .map_err(|e| self.fail(p, &format!("invalid regular expression: {}", e)))?,
+                    Value::Regex(re) => re.as_ref().clone(),
+                    _ => return Err(self.fail(p, "match pattern must be a string or regex")),
                 };
-                if name == "replaceAll" {
-                    Ok(Value::String(replace_all(&re, s, &replacement)))
+                if re.flags().global {
+                    let ms = re.find_all(s).map_err(|e| self.fail(p, &e))?;
+                    let items = ms
+                        .into_iter()
+                        .map(|m| {
+                            let (a, b) = m.captures[0].unwrap();
+                            Value::String(u16_range_to_str(s, a, b))
+                        })
+                        .collect();
+                    Ok(Value::array(items))
                 } else {
-                    match find_submatch_index(&re, s) {
-                        None => Ok(Value::String(s.to_string())),
-                        Some(indexes) => {
-                            let caps = re.captures(s).unwrap();
-                            let expanded = expand(&re, &replacement, s, &caps);
-                            let (a, b) = indexes[0];
-                            Ok(Value::String(format!(
-                                "{}{}{}",
-                                &s[..a as usize],
-                                expanded,
-                                &s[b as usize..]
-                            )))
-                        }
+                    match re.find(s, 0).map_err(|e| self.fail(p, &e))? {
+                        None => Ok(Value::Null),
+                        Some(m) => Ok(regexp_match_value(s, &m.captures)),
                     }
                 }
             }
+            "matchAll" => {
+                let re = match &args[0] {
+                    Value::Regex(re) => re,
+                    _ => return Err(self.fail(p, "matchAll requires a regular expression")),
+                };
+                if !re.flags().global {
+                    return Err(self.fail(p, "matchAll requires a regular expression with g flag"));
+                }
+                let ms = re.find_all(s).map_err(|e| self.fail(p, &e))?;
+                let items = ms.into_iter().map(|m| regexp_match_value(s, &m.captures)).collect();
+                Ok(Value::array(items))
+            }
+            "replace" => {
+                let re = match &args[0] {
+                    Value::String(pat) => crate::regex::Regex::new(pat, "")
+                        .map_err(|e| self.fail(p, &format!("invalid regular expression: {}", e)))?,
+                    Value::Regex(re) => re.as_ref().clone(),
+                    _ => return Err(self.fail(p, "replace pattern must be a string or regex")),
+                };
+                let replacement = match &args[1] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err(self.fail(p, "replace replacement must be a string")),
+                };
+                let out = re.replace(s, &replacement).map_err(|e| self.fail(p, &e))?;
+                Ok(Value::String(out))
+            }
+            "replaceAll" => {
+                let re = match &args[0] {
+                    Value::String(pat) => crate::regex::Regex::new(pat, "g")
+                        .map_err(|e| self.fail(p, &format!("invalid regular expression: {}", e)))?,
+                    Value::Regex(re) => {
+                        if !re.flags().global {
+                            return Err(self.fail(p, "replaceAll requires a regular expression with g flag"));
+                        }
+                        re.as_ref().clone()
+                    }
+                    _ => return Err(self.fail(p, "replaceAll pattern must be a string or regex")),
+                };
+                let replacement = match &args[1] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err(self.fail(p, "replaceAll replacement must be a string")),
+                };
+                let out = re.replace(s, &replacement).map_err(|e| self.fail(p, &e))?;
+                Ok(Value::String(out))
+            }
             _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
+        }
+    }
+
+    fn regex_method(
+        &mut self,
+        p: Pos,
+        re: &Rc<crate::regex::Regex>,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        match name {
+            "test" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "test expects 1 argument"));
+                }
+                let s = match &args[0] {
+                    Value::String(s) => s,
+                    _ => return Err(self.fail(p, "test argument must be a string")),
+                };
+                Ok(Value::Bool(re.test(s).map_err(|e| self.fail(p, &e))?))
+            }
+            "exec" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "exec expects 1 argument"));
+                }
+                let s = match &args[0] {
+                    Value::String(s) => s,
+                    _ => return Err(self.fail(p, "exec argument must be a string")),
+                };
+                match re.find(s, 0).map_err(|e| self.fail(p, &e))? {
+                    None => Ok(Value::Null),
+                    Some(m) => {
+                        let mut entries: Vec<(String, Value)> = Vec::new();
+                        for (i, cap) in m.captures.iter().enumerate() {
+                            let v = match cap {
+                                Some((a, b)) => Value::String(u16_range_to_str(s, *a, *b)),
+                                None => Value::Null,
+                            };
+                            entries.push((i.to_string(), v));
+                        }
+                        let (a, _) = m.captures[0].unwrap();
+                        entries.push(("index".to_string(), Value::Number(a as f64)));
+                        entries.push(("input".to_string(), Value::String(s.to_string())));
+                        Ok(Value::object_with(entries))
+                    }
+                }
+            }
+            _ => Err(self.fail(p, &format!("unknown regex method {:?}", name))),
         }
     }
 
@@ -1188,7 +1301,7 @@ fn type_of(v: &Value) -> &'static str {
     match v {
         Value::String(_) => "string",
         Value::Array(_) => "array",
-        Value::Object(_) | Value::Null => "object",
+        Value::Object(_) | Value::Null | Value::Regex(_) => "object",
         Value::Bool(_) => "boolean",
         Value::Number(_) => "number",
         Value::Function(_) | Value::Builtin(_) => "function",
@@ -1230,6 +1343,7 @@ fn value_string(v: &Value) -> String {
             parts.join(",")
         }
         Value::Function(_) | Value::Builtin(_) => "[Function]".to_string(),
+        Value::Regex(re) => format!("/{}/{}", re.source(), re.flags()),
         Value::Object(_) => match jsonc::marshal(v) {
             Ok(s) => s,
             Err(_) => format!("{:?}", v),
@@ -1237,143 +1351,39 @@ fn value_string(v: &Value) -> String {
     }
 }
 
-fn captures_to_indexes(caps: &regex::Captures) -> Vec<(i64, i64)> {
-    (0..caps.len())
-        .map(|i| match caps.get(i) {
-            Some(m) => (m.start() as i64, m.end() as i64),
-            None => (-1, -1),
-        })
-        .collect()
-}
-
-fn find_submatch_index(re: &Regex, s: &str) -> Option<Vec<(i64, i64)>> {
-    re.captures(s).map(|c| captures_to_indexes(&c))
-}
-
-fn regexp_match_value(s: &str, indexes: &[(i64, i64)]) -> Value {
-    let items = indexes
+fn regexp_match_value(s: &str, caps: &[Option<(usize, usize)>]) -> Value {
+    let items = caps
         .iter()
-        .map(|&(start, end)| {
-            if start >= 0 {
-                Value::String(s[start as usize..end as usize].to_string())
-            } else {
-                Value::Null
-            }
+        .map(|c| match c {
+            Some((a, b)) => Value::String(u16_range_to_str(s, *a, *b)),
+            None => Value::Null,
         })
         .collect();
     Value::array(items)
 }
 
-fn re_split_all(re: &Regex, s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut beg = 0usize;
-    let mut end = 0usize;
-    for m in re.find_iter(s) {
-        end = m.start();
-        if m.end() != 0 {
-            out.push(s[beg..end].to_string());
-        }
-        beg = m.end();
+fn u16_range_to_str(s: &str, start: usize, end: usize) -> String {
+    let v = crate::regex::to_utf16(s);
+    let start = start.min(v.len());
+    let end = end.min(v.len());
+    if start >= end {
+        return String::new();
     }
-    if end != s.len() {
-        out.push(s[beg..].to_string());
-    }
-    out
+    char::decode_utf16(v[start..end].iter().copied())
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect()
 }
 
-fn replace_all(re: &Regex, s: &str, replacement: &str) -> String {
-    let mut out = String::new();
-    let mut last = 0usize;
-    for caps in re.captures_iter(s) {
-        let indexes = captures_to_indexes(&caps);
-        let (a, b) = indexes[0];
-        out.push_str(&s[last..a as usize]);
-        out.push_str(&expand(re, replacement, s, &caps));
-        last = b as usize;
-    }
-    out.push_str(&s[last..]);
-    out
-}
-
-fn expand(re: &Regex, template: &str, s: &str, caps: &regex::Captures) -> String {
-    let mut out = String::new();
-    let mut template = template;
-    while let Some(dollar) = template.find('$') {
-        out.push_str(&template[..dollar]);
-        template = &template[dollar + 1..];
-        if let Some(rest) = template.strip_prefix('$') {
-            out.push('$');
-            template = rest;
-            continue;
-        }
-        match extract_group(template) {
-            None => {
-                out.push('$');
-                template = &template[1..];
-            }
-            Some((name, num, rest)) => {
-                template = rest;
-                if let Some(n) = num {
-                    if let Some(m) = caps.get(n) {
-                        out.push_str(&s[m.start()..m.end()]);
-                    }
-                } else {
-                    for (idx, nm) in re.capture_names().enumerate() {
-                        if nm == Some(name) {
-                            if let Some(m) = caps.get(idx) {
-                                out.push_str(&s[m.start()..m.end()]);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    out.push_str(template);
-    out
-}
-
-fn extract_group(template: &str) -> Option<(&str, Option<usize>, &str)> {
-    let mut t = template;
-    let mut brace = false;
-    if t.starts_with('{') {
-        brace = true;
-        t = &t[1..];
-    }
-    let mut i = 0;
-    for c in t.chars() {
-        if c.is_alphabetic() || c.is_ascii_digit() || c == '_' {
-            i += c.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if i == 0 {
-        return None;
-    }
-    let name = &t[..i];
-    t = &t[i..];
-    if brace {
-        if !t.starts_with('}') {
-            return None;
-        }
-        t = &t[1..];
-    }
-    let mut num: usize = 0;
-    let mut is_num = true;
-    for b in name.bytes() {
-        if !b.is_ascii_digit() || num >= 100_000_000 {
-            is_num = false;
-            break;
-        }
-        num = num * 10 + (b - b'0') as usize;
-    }
-    if is_num {
-        Some((name, Some(num), t))
+fn literal_split(s: &str, sep: &str, limit: Option<usize>) -> Vec<String> {
+    let mut parts: Vec<String> = if sep.is_empty() {
+        s.chars().map(|c| c.to_string()).collect()
     } else {
-        Some((name, None, t))
+        s.split(sep).map(|x| x.to_string()).collect()
+    };
+    if let Some(lim) = limit {
+        parts.truncate(lim);
     }
+    parts
 }
 
 pub fn execute(src: &str, root: Value, max_steps: usize) -> Result<(Value, Option<Value>), Error> {
