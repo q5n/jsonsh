@@ -17,7 +17,7 @@ fn args(a: &[&str]) -> Vec<String> {
     a.iter().map(|s| s.to_string()).collect()
 }
 
-fn run(a: &[&str], input: Input<impl Read>, out: &mut Vec<u8>) -> Result<(), String> {
+fn run(a: &[&str], input: Input<impl Read>, out: &mut Vec<u8>) -> Result<i32, String> {
     cli::run(&args(a), input, out)
 }
 
@@ -296,6 +296,38 @@ fn no_arguments_shows_help() {
     let text = stdout_str(&out);
     assert!(text.contains(&format!("jsonsh {} -", cli::VERSION)));
     assert!(text.contains("Usage:"));
+}
+
+#[test]
+fn top_level_return_sets_process_exit_code() {
+    let mut out = Vec::new();
+    let code = run(&["-e", "return 5"], Input::stream(Cursor::new("{}")), &mut out).unwrap();
+    assert_eq!(code, 5);
+
+    out.clear();
+    let code = run(&["-e", "return"], Input::stream(Cursor::new("{}")), &mut out).unwrap();
+    assert_eq!(code, 0);
+
+    out.clear();
+    let code = run(&["-e", "return 300"], Input::stream(Cursor::new("{}")), &mut out).unwrap();
+    assert_eq!(code, 255);
+
+    out.clear();
+    let code = run(&["-e", "return -5"], Input::stream(Cursor::new("{}")), &mut out).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn top_level_return_still_writes_output() {
+    let mut out = Vec::new();
+    let code = run(
+        &["-e", "$.a = 1; return 2", "-c"],
+        Input::stream(Cursor::new("{}")),
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(code, 2);
+    assert_eq!(stdout_str(&out), "{\"a\":1}\n");
 }
 
 #[test]

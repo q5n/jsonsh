@@ -49,7 +49,7 @@ pub fn run<R: Read, W: Write>(
     args: &[String],
     mut input: Input<R>,
     stdout: &mut W,
-) -> Result<(), String> {
+) -> Result<i32, String> {
     let args = expand_short_options(args);
     let mut o = Options {
         max_steps: 1_000_000,
@@ -76,7 +76,7 @@ pub fn run<R: Read, W: Write>(
         match name.as_str() {
             "h" | "help" => {
                 print_usage(stdout)?;
-                return Ok(());
+                return Ok(0);
             }
             "v" | "version" => {
                 o.show_version = true;
@@ -136,15 +136,15 @@ pub fn run<R: Read, W: Write>(
 
     if args.is_empty() {
         print_usage(stdout)?;
-        return Ok(());
+        return Ok(0);
     }
     if o.show_version {
         writeln!(stdout, "jsonsh {}", VERSION).map_err(|e| e.to_string())?;
-        return Ok(());
+        return Ok(0);
     }
     if o.syntax_help {
         print_language_help(stdout)?;
-        return Ok(());
+        return Ok(0);
     }
     if o.expr_set == o.script_set {
         return Err("exactly one of -e or -f is required".to_string());
@@ -195,14 +195,16 @@ pub fn run<R: Read, W: Write>(
     let doc = jsonc::parse(raw).map_err(|e| e.to_string())?;
     let mut root = doc.root.value.deep_clone();
     let mut last: Option<Value> = None;
+    let mut exit_code = 0;
     if !code.is_empty() {
-        let (r, l) = lang::execute_with_output(&code, root, o.max_steps, stdout)
+        let (r, l, code) = lang::execute_with_output_exit(&code, root, o.max_steps, stdout)
             .map_err(|e| e.to_string())?;
         root = r;
         last = l;
+        exit_code = code;
     }
     if o.no_output {
-        return Ok(());
+        return Ok(exit_code);
     }
 
     let output = if o.result {
@@ -225,12 +227,12 @@ pub fn run<R: Read, W: Write>(
 
     let data = output.as_bytes();
     if o.in_place {
-        return replace_file(&input_file, data);
+        return replace_file(&input_file, data).map(|()| exit_code);
     }
     if let Some(path) = &o.output {
-        return fs::write(path, data).map_err(|e| e.to_string());
+        return fs::write(path, data).map(|()| exit_code).map_err(|e| e.to_string());
     }
-    stdout.write_all(data).map_err(|e| e.to_string())
+    stdout.write_all(data).map(|()| exit_code).map_err(|e| e.to_string())
 }
 
 fn take_value(
@@ -528,7 +530,8 @@ Operators (JS precedence, highest to lowest)\n\
 Statements\n\
   if/else, for..in, for..of, for(;;), delete, break, continue, return.\n\
   Bodies may be a single brace-less statement; a dangling else binds to the\n\
-  nearest if. No switch, no try/catch.\n\
+  nearest if. No switch, no try/catch. A top-level return [number] sets the\n\
+  process exit code (default 0, clamped to 0..=255) and stops execution.\n\
 \n\
 Built-ins\n\
   log(value, ...)      print arguments, space-separated\n\

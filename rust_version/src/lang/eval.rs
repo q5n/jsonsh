@@ -57,6 +57,7 @@ pub struct Runtime<'a> {
     steps: usize,
     depth: usize,
     last: Option<Value>,
+    exit_code: i32,
     output: Option<&'a mut dyn Write>,
 }
 
@@ -109,6 +110,7 @@ impl<'a> Runtime<'a> {
             steps: 0,
             depth: 0,
             last: None,
+            exit_code: 0,
             output: None,
         }
     }
@@ -136,14 +138,40 @@ impl<'a> Runtime<'a> {
 
     fn run(&mut self, p: &Program) -> Result<(), Error> {
         if let Some(sig) = self.exec_list(&p.list)? {
-            let label = match sig {
-                Signal::Break => "break",
-                Signal::Continue => "continue",
-                Signal::Return(_) => "return",
-            };
-            return Err(self.fail(Pos { line: 1, col: 1 }, &format!("{} outside function", label)));
+            match sig {
+                Signal::Return(v) => self.exit_code = self.exit_code_of(&v)?,
+                Signal::Break => {
+                    return Err(self.fail(Pos { line: 1, col: 1 }, "break outside function"))
+                }
+                Signal::Continue => {
+                    return Err(self.fail(Pos { line: 1, col: 1 }, "continue outside function"))
+                }
+            }
         }
         Ok(())
+    }
+
+    /// A top-level `return` sets the process exit code: `return` and `return
+    /// null` give 0, a number is truncated and clamped to 0..=255.
+    fn exit_code_of(&self, v: &Value) -> Result<i32, Error> {
+        let pos = Pos { line: 1, col: 1 };
+        match v {
+            Value::Null => Ok(0),
+            Value::Number(n) => {
+                if n.is_nan() {
+                    return Err(self.fail(pos, "top-level return must be a finite number"));
+                }
+                let code = n.trunc();
+                Ok(if code < 0.0 {
+                    0
+                } else if code > 255.0 {
+                    255
+                } else {
+                    code as i32
+                })
+            }
+            _ => Err(self.fail(pos, "top-level return must be a number")),
+        }
     }
 
     fn step(&mut self, p: Pos) -> Result<(), Error> {
@@ -1961,9 +1989,18 @@ pub fn execute_with_output(
     max_steps: usize,
     output: &mut dyn Write,
 ) -> Result<(Value, Option<Value>), Error> {
+    execute_with_output_exit(src, root, max_steps, output).map(|(r, l, _)| (r, l))
+}
+
+pub fn execute_with_output_exit(
+    src: &str,
+    root: Value,
+    max_steps: usize,
+    output: &mut dyn Write,
+) -> Result<(Value, Option<Value>, i32), Error> {
     let p = parser::parse(src)?;
     let mut r = Runtime::new(root, max_steps);
     r.output = Some(output);
     r.run(&p)?;
-    Ok((r.root(), r.last()))
+    Ok((r.root(), r.last(), r.exit_code))
 }

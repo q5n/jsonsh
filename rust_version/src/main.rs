@@ -11,8 +11,11 @@ fn main() {
         terminal,
     };
     let mut stdout = io::stdout();
-    if let Err(e) = cli::run(&args, input, &mut stdout) {
-        eprintln!("jsonsh: {}", e);
-        std::process::exit(1);
+    match cli::run(&args, input, &mut stdout) {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("jsonsh: {}", e);
+            std::process::exit(1);
+        }
     }
 }

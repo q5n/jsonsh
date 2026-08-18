@@ -25,6 +25,10 @@ fn execute(code: &str, root: Value, max: usize) -> Result<(Value, Option<Value>)
     lang::execute(code, root, max)
 }
 
+fn execute_exit(code: &str, root: Value) -> (Value, Option<Value>, i32) {
+    lang::execute_with_output_exit(code, root, 10000, &mut std::io::sink()).unwrap()
+}
+
 #[test]
 fn literals_operators_and_builtins() {
     let (r, _) = run(
@@ -1460,12 +1464,45 @@ fn object_method_call_arrow() {
 }
 
 #[test]
-fn return_outside_function_errors() {
-    let e = execute("return 1", obj(vec![]), 100);
-    match e {
-        Err(err) => assert!(err.to_string().contains("return outside function"), "{:?}", err),
-        Ok(_) => panic!("should error"),
+fn top_level_return_sets_exit_code() {
+    let (_, _, code) = execute_exit("return 5", obj(vec![]));
+    assert_eq!(code, 5);
+}
+
+#[test]
+fn top_level_return_defaults_clamps_and_truncates() {
+    assert_eq!(execute_exit("return", obj(vec![])).2, 0);
+    assert_eq!(execute_exit("return 0", obj(vec![])).2, 0);
+    assert_eq!(execute_exit("return 300", obj(vec![])).2, 255);
+    assert_eq!(execute_exit("return -5", obj(vec![])).2, 0);
+    assert_eq!(execute_exit("return 3.9", obj(vec![])).2, 3);
+}
+
+#[test]
+fn top_level_return_stops_execution_and_keeps_output() {
+    let (root, _, code) = execute_exit("$.a = 1; return 2; $.b = 1", obj(vec![]));
+    assert_eq!(code, 2);
+    match &root {
+        Value::Object(o) => {
+            let o = o.borrow();
+            assert_eq!(o.get("a"), Some(&num(1.0)));
+            assert!(!o.contains_key("b"));
+        }
+        _ => panic!("root must be object"),
     }
+}
+
+#[test]
+fn top_level_return_requires_a_number() {
+    let e = execute("return \"abc\"", obj(vec![]), 100);
+    assert!(e.is_err(), "non-number return should error");
+}
+
+#[test]
+fn function_return_does_not_set_exit_code() {
+    let (_, last, code) = execute_exit("f = () => { return 7 }; f()", obj(vec![]));
+    assert_eq!(code, 0);
+    assert_eq!(last, Some(num(7.0)));
 }
 
 #[test]
@@ -1582,9 +1619,9 @@ fn break_continue_outside_loop_inside_function_errors() {
 }
 
 #[test]
-fn return_in_if_without_function_errors() {
-    let e = execute("if (true) return 1", obj(vec![]), 100);
-    assert!(e.is_err(), "return in brace-less if outside function should error");
+fn top_level_return_in_if_sets_exit_code() {
+    let (_, _, code) = execute_exit("if (true) return 3", obj(vec![]));
+    assert_eq!(code, 3);
 }
 
 #[test]
