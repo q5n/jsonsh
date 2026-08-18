@@ -6,13 +6,15 @@
 
 ## Data types and variables
 
-The runtime supports only `null`, `boolean`, `number` (`float64`), `string`, `array`, and `object`. There are no implicit type conversions except string concatenation with `+`, which converts both operands using the language's `toString()` rules. Assigning to a regular identifier for the first time creates a global variable; reading an undefined variable is an error. There is no block scope. `$` is the predefined root variable. Its members can be modified, and `$ = value` can replace the entire root value. Deleting `$` remains prohibited.
+The runtime supports `null`, `boolean`, `number` (`float64`), `string`, `array`, `object`, and `function`. There are no implicit type conversions except string concatenation with `+`, which converts both operands using the language's `toString()` rules. Assigning to a regular identifier for the first time creates a global variable; reading an undefined variable is an error. There is no block scope. `$` is the predefined root variable. Its members can be modified, and `$ = value` can replace the entire root value. Deleting `$` remains prohibited.
 
 Literals include single- and double-quoted strings, JSON-format numbers, booleans, null, arrays, and objects. Object keys may be strings or identifiers, and script literals may contain trailing commas. Strings support common escape sequences and `\uXXXX`. Scripts support `//` and `/* ... */` comments.
 
 ## Expressions
 
-Operator precedence, from lowest to highest, is: assignment `= += -= *= /=` (right-associative), `||`, `&&`, `== !=`, `> >= < <=`, `+ -`, `* /`, unary `! -`, and finally member access and calls.
+Operator precedence, from lowest to highest, is: assignment `= += -= *= /=` (right-associative), `||`, `&&`, `== !=`, `> >= < <=`, `+ -`, `* /`, unary `! - typeof`, and finally member access and calls.
+
+- Arrow functions create function values: `(a, b) => expression`, `(a, b) => { statements }`, `x => expression`, or `() => expression`. The body is either a single expression whose value is returned, or a braced block that returns via `return` (or `null` if it completes without one). Arrow functions are lexical closures: they capture the variables visible at definition time and share them with other closures and the global scope. Parameters are local to the call; missing arguments become `null` and extra arguments are ignored. A `return` outside a function is an error. Function values are truthy, stringify as `[Function]`, and marshal to `null`. The built-in functions `log`, `env`, and `keys` are ordinary global variables and may be reassigned (shadowed) by user code.
 
 - `+` accepts two numbers for addition or two strings for concatenation. Other arithmetic operators accept numbers only. Division by zero is an error.
 - Equality operators do not convert types. Arrays and objects use recursive deep equality.
@@ -38,6 +40,7 @@ for (initializer; condition; update) statement
 delete object.member;
 break;
 continue;
+return [value];
 ```
 
 A brace-less body contains exactly one statement, so control-flow statements may nest as bodies (e.g. `if (a) for (x of xs) { ... }`). A dangling `else` binds to the nearest preceding `if`.
@@ -53,7 +56,7 @@ The traditional `for (initializer; condition; update) { ... }` loop evaluates th
 - Strings and arrays provide a read-only `length` property. String length counts Unicode code points.
 - Strings provide `toLowerCase()`, `toUpperCase()`, `substring(start[, end])`, `indexOf(text[, start])`, `lastIndexOf(text[, start])`, `localeCompare(text)`, `padStart(targetLength[, padString])`, `padEnd(targetLength[, padString])`, `split(pattern[, limit])`, `match(pattern)`, `matchAll(pattern)`, `replace(pattern, replacement)`, `replaceAll(pattern, replacement)`, and `trim()`. String lengths and padding operate on Unicode code points. Padding defaults to a space. Pattern arguments use Go regular-expression syntax, not JavaScript regex literals. `match` returns the full first match followed by its capture groups, or `null`; `matchAll` returns an array of those match arrays. Replacement strings use Go expansion syntax such as `$1`.
 - Arrays provide `push(value, ...)`, `reverse()`, `splice(start[, deleteCount, ...items])`, `join([separator])`, `indexOf(value[, start])`, and `lastIndexOf(value[, start])`. `reverse()` reverses the array in place and returns the same array reference. Array searches use the language's recursive deep equality.
-- `typeof(v)` returns `string`, `array`, `object`, `boolean`, or `number`. Like JavaScript, `typeof(null)` returns `object`.
+- `typeof value` is a prefix expression that returns `string`, `array`, `object`, `boolean`, `number`, or `function`. Like JavaScript, `typeof null` returns `object`.
 - `keys(v)` returns object keys in lexicographic order or numeric array indexes.
 - Every supported value provides `toString()`. Objects are encoded as compact, single-line JSON. Array string conversion uses comma-separated element values.
 
@@ -81,4 +84,4 @@ jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]
 
 When `INPUT` is omitted, input is read from standard input if it is redirected or piped; otherwise `$` is initialized to `null`. `-e` and `-f`, `-o` and `-i`, and `-p` and `-c` are mutually exclusive. `-i` requires an input file. The default mode applies minimal changes and preserves the original source structure. `--pretty` reformats while retaining comments. `--compact` emits comment-free standard JSON. In-place writes first create a temporary file in the same directory and replace the input only after the output has been written and closed successfully. See [jsonc-preserve.md](jsonc-preserve.md) for details.
 
-Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. An explicitly empty expression (`-e ""`) performs no mutations and outputs the root value in the selected output mode. Function definitions, `return`, `while`, increment operators, modulo, ternary expressions, slicing, and JavaScript standard objects are not supported yet.
+Lexical, syntax, and runtime errors include line and column positions, are written to standard error, and produce a nonzero exit code. Failed execution does not write an output file. An explicitly empty expression (`-e ""`) performs no mutations and outputs the root value in the selected output mode. Named function statements, `while`, increment operators, modulo, ternary expressions, default parameters, rest/spread, slicing, and JavaScript standard objects are not supported yet.

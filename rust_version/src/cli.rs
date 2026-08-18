@@ -501,7 +501,7 @@ fn print_language_help<W: Write>(w: &mut W) -> Result<(), String> {
         "jsonsh {} scripting language reference\n\
 \n\
 Values and literals:\n\
-  null, boolean, number, string, array, object\n\
+  null, boolean, number, string, array, object, function\n\
   null  true  false  12.5  \"text\"  'text'  [1, 2]  {{name: \"Tom\"}}\n\
   Strings support common escapes and \\uXXXX. Arrays and objects allow trailing commas.\n\
 \n\
@@ -513,6 +513,16 @@ Variables:\n\
   value[key]              Object property or array element; negative indexes\n\
                           count from the end, and assigning beyond length\n\
                           grows the array with null holes\n\
+\n\
+Functions:\n\
+  (a, b) => expression    Arrow function returning the expression\n\
+  (a, b) => {{ ... }}       Arrow function with a block body; use return\n\
+  x => expression         Single parameter needs no parentheses\n\
+  () => expression        Zero parameters\n\
+  return [value]          Return from a function; return; gives null\n\
+  Functions are lexical closures. Missing arguments are null; extra arguments\n\
+  are ignored. A function stringifies as [Function], is truthy, and marshals\n\
+  to null. log/env/keys are globals and may be reassigned.\n\
 \n\
 Statements:\n\
   expression;\n\
@@ -546,7 +556,7 @@ Operators, from lowest to highest precedence:\n\
   >  >=  <  <=\n\
   +  -\n\
   *  /\n\
-  !  -value\n\
+  !  -  typeof value\n\
   member access and method calls\n\
 \n\
   Assignments are right-associative. Logical operators short-circuit. The +\n\
@@ -560,8 +570,10 @@ Properties:\n\
 Built-in functions:\n\
   log(value, ...)               Print values separated by spaces\n\
   env(name)                     Read an environment variable, or null if unset\n\
-  typeof(value)                 string, array, object, boolean, or number\n\
   keys(value)                   Ordered object keys or numeric array indexes\n\
+\n\
+Operators include the prefix expression typeof value, which returns string,\n\
+array, object, boolean, number, or function (typeof null is \"object\").\n\
 \n\
 String methods:\n\
   toString()\n\

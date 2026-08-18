@@ -253,7 +253,7 @@ fn language_help() {
         "for (init; condition; update)",
         "log(value, ...)",
         "env(name)",
-        "typeof(value)",
+        "typeof value",
         "string.length",
         "array.length",
         "toLowerCase()",

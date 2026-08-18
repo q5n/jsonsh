@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -6,19 +7,62 @@ use std::rc::Rc;
 use regex::Regex;
 
 use crate::jsonc;
-use crate::value::Value;
+use crate::value::{Builtin, Function, Value};
 
-use super::ast::{Expr, Program, Stmt};
+use super::ast::{ArrowBody, Expr, Program, Stmt};
 use super::parser;
 use super::token::{Error, Pos, Tok};
 
+struct Env {
+    vars: RefCell<BTreeMap<String, Value>>,
+    parent: Option<Rc<Env>>,
+}
+
+impl Env {
+    fn new(parent: Option<Rc<Env>>) -> Rc<Env> {
+        Rc::new(Env {
+            vars: RefCell::new(BTreeMap::new()),
+            parent,
+        })
+    }
+
+    fn get(&self, name: &str) -> Option<Value> {
+        if let Some(v) = self.vars.borrow().get(name) {
+            return Some(v.clone());
+        }
+        self.parent.as_ref().and_then(|p| p.get(name))
+    }
+
+    fn assign(&self, name: &str, v: Value) -> bool {
+        if self.vars.borrow().contains_key(name) {
+            self.vars.borrow_mut().insert(name.to_string(), v);
+            return true;
+        }
+        match &self.parent {
+            Some(p) => p.assign(name, v),
+            None => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Signal {
+    Break,
+    Continue,
+    Return(Value),
+}
+
 pub struct Runtime<'a> {
-    globals: BTreeMap<String, Value>,
+    scope: Rc<Env>,
+    root: Rc<Env>,
     max_steps: usize,
     steps: usize,
+    depth: usize,
     last: Option<Value>,
     output: Option<&'a mut dyn Write>,
 }
+
+const MAX_CALL_DEPTH: usize = 64;
 
 enum Ref {
     Var(String, Pos),
@@ -29,19 +73,46 @@ enum Ref {
 impl<'a> Runtime<'a> {
     fn new(root: Value, max: usize) -> Runtime<'a> {
         let max = if max == 0 { 1_000_000 } else { max };
-        let mut globals = BTreeMap::new();
-        globals.insert("$".to_string(), root);
+        let root_env = Env::new(None);
+        root_env.vars.borrow_mut().insert("$".to_string(), root);
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("log".to_string(), Value::builtin(Builtin::Log));
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("env".to_string(), Value::builtin(Builtin::Env));
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("keys".to_string(), Value::builtin(Builtin::Keys));
         Runtime {
-            globals,
+            scope: root_env.clone(),
+            root: root_env,
             max_steps: max,
             steps: 0,
+            depth: 0,
             last: None,
             output: None,
         }
     }
 
     fn root(&self) -> Value {
-        self.globals["$"].clone()
+        self.root.get("$").unwrap()
+    }
+
+    fn get_var(&self, name: &str) -> Option<Value> {
+        self.scope.get(name)
+    }
+
+    fn set_var(&self, name: &str, v: Value) {
+        if !self.scope.assign(name, v.clone()) {
+            self.root
+                .vars
+                .borrow_mut()
+                .insert(name.to_string(), v);
+        }
     }
 
     fn last(&self) -> Option<Value> {
@@ -50,7 +121,12 @@ impl<'a> Runtime<'a> {
 
     fn run(&mut self, p: &Program) -> Result<(), Error> {
         if let Some(sig) = self.exec_list(&p.list)? {
-            return Err(self.fail(Pos { line: 1, col: 1 }, &format!("{} outside loop", sig)));
+            let label = match sig {
+                Signal::Break => "break",
+                Signal::Continue => "continue",
+                Signal::Return(_) => "return",
+            };
+            return Err(self.fail(Pos { line: 1, col: 1 }, &format!("{} outside function", label)));
         }
         Ok(())
     }
@@ -67,7 +143,7 @@ impl<'a> Runtime<'a> {
         Error::new("RuntimeError", p, msg.to_string())
     }
 
-    fn exec_list(&mut self, xs: &[Stmt]) -> Result<Option<&'static str>, Error> {
+    fn exec_list(&mut self, xs: &[Stmt]) -> Result<Option<Signal>, Error> {
         for s in xs {
             self.step(s.pos())?;
             if let Some(sig) = self.exec(s)? {
@@ -77,7 +153,7 @@ impl<'a> Runtime<'a> {
         Ok(None)
     }
 
-    fn exec(&mut self, s: &Stmt) -> Result<Option<&'static str>, Error> {
+    fn exec(&mut self, s: &Stmt) -> Result<Option<Signal>, Error> {
         match s {
             Stmt::Expr(_, x) => {
                 let v = self.eval(x)?;
@@ -100,8 +176,15 @@ impl<'a> Runtime<'a> {
                 self.ref_del(&r)?;
                 Ok(None)
             }
-            Stmt::Break(_) => Ok(Some("break")),
-            Stmt::Continue(_) => Ok(Some("continue")),
+            Stmt::Break(_) => Ok(Some(Signal::Break)),
+            Stmt::Continue(_) => Ok(Some(Signal::Continue)),
+            Stmt::Return(_, e) => {
+                let v = match e {
+                    Some(x) => self.eval(x)?,
+                    None => Value::Null,
+                };
+                Ok(Some(Signal::Return(v)))
+            }
             Stmt::For(p, name, of, source, body) => self.exec_for(*p, name, *of, source, body),
             Stmt::ForC(p, init, cond, update, body) => {
                 self.exec_for_c(*p, init, cond, update, body)
@@ -116,7 +199,7 @@ impl<'a> Runtime<'a> {
         of: bool,
         source: &Expr,
         body: &Stmt,
-    ) -> Result<Option<&'static str>, Error> {
+    ) -> Result<Option<Signal>, Error> {
         let v = self.eval(source)?;
         if of {
             return self.exec_for_of(p, name, &v, body);
@@ -131,10 +214,10 @@ impl<'a> Runtime<'a> {
             if !exists(&current, &k) {
                 continue;
             }
-            self.globals.insert(name.to_string(), k);
+            self.set_var(name, k);
             match self.exec(body)? {
-                Some("break") => break,
-                Some("continue") => continue,
+                Some(Signal::Break) => break,
+                Some(Signal::Continue) => continue,
                 Some(sig) => return Ok(Some(sig)),
                 None => {}
             }
@@ -149,7 +232,7 @@ impl<'a> Runtime<'a> {
         cond: &Option<Expr>,
         update: &Option<Expr>,
         body: &Stmt,
-    ) -> Result<Option<&'static str>, Error> {
+    ) -> Result<Option<Signal>, Error> {
         if let Some(init) = init {
             self.step(init.pos())?;
             self.exec(init)?;
@@ -162,8 +245,8 @@ impl<'a> Runtime<'a> {
                 }
             }
             match self.exec(body)? {
-                Some("break") => break,
-                Some("continue") => {}
+                Some(Signal::Break) => break,
+                Some(Signal::Continue) => {}
                 Some(sig) => return Ok(Some(sig)),
                 None => {}
             }
@@ -182,7 +265,7 @@ impl<'a> Runtime<'a> {
         name: &str,
         iterable: &Value,
         body: &Stmt,
-    ) -> Result<Option<&'static str>, Error> {
+    ) -> Result<Option<Signal>, Error> {
         match iterable {
             Value::Array(a) => {
                 let mut i = 0usize;
@@ -192,13 +275,11 @@ impl<'a> Runtime<'a> {
                         break;
                     }
                     let value = a.borrow()[i].clone();
-                    self.globals.insert(name.to_string(), value);
+                    self.set_var(name, value);
                     match self.exec(body)? {
-                        None | Some("continue") => {}
-                        Some("break") => return Ok(None),
-                        Some(sig) => {
-                            return Err(self.fail(p, &format!("unexpected loop signal {:?}", sig)))
-                        }
+                        None | Some(Signal::Continue) => {}
+                        Some(Signal::Break) => return Ok(None),
+                        Some(Signal::Return(v)) => return Ok(Some(Signal::Return(v))),
                     }
                     i += 1;
                 }
@@ -206,13 +287,11 @@ impl<'a> Runtime<'a> {
             }
             Value::String(s) => {
                 for ch in s.chars() {
-                    self.globals.insert(name.to_string(), Value::String(ch.to_string()));
+                    self.set_var(name, Value::String(ch.to_string()));
                     match self.exec(body)? {
-                        None | Some("continue") => {}
-                        Some("break") => return Ok(None),
-                        Some(sig) => {
-                            return Err(self.fail(p, &format!("unexpected loop signal {:?}", sig)))
-                        }
+                        None | Some(Signal::Continue) => {}
+                        Some(Signal::Break) => return Ok(None),
+                        Some(Signal::Return(v)) => return Ok(Some(Signal::Return(v))),
                     }
                 }
                 Ok(None)
@@ -226,9 +305,7 @@ impl<'a> Runtime<'a> {
         match e {
             Expr::Literal(_, v) => Ok(v.clone()),
             Expr::Variable(p, name) => self
-                .globals
-                .get(name)
-                .cloned()
+                .get_var(name)
                 .ok_or_else(|| self.fail(*p, &format!("undefined variable {:?}", name))),
             Expr::Array(_, items) => {
                 let mut a = Vec::with_capacity(items.len());
@@ -246,6 +323,10 @@ impl<'a> Runtime<'a> {
                 Ok(Value::object_with(m.into_iter().collect()))
             }
             Expr::Unary(p, op, x) => {
+                if *op == Tok::Typeof {
+                    let v = self.eval(x)?;
+                    return Ok(Value::String(type_of(&v).to_string()));
+                }
                 let v = self.eval(x)?;
                 if *op == Tok::Bang {
                     Ok(Value::Bool(!truth(&v)))
@@ -283,6 +364,11 @@ impl<'a> Runtime<'a> {
             }
             Expr::Call(p, name, args) => self.call(*p, name, args),
             Expr::MethodCall(p, recv, name, args) => self.method_call(*p, recv, name, args),
+            Expr::Arrow(_, params, body) => {
+                let body: Rc<dyn Any> = Rc::new((**body).clone());
+                let env: Rc<dyn Any> = self.scope.clone();
+                Ok(Value::closure(params.clone(), body, env))
+            }
         }
     }
 
@@ -421,9 +507,7 @@ impl<'a> Runtime<'a> {
     fn ref_get(&self, r: &Ref) -> Result<Value, Error> {
         match r {
             Ref::Var(name, p) => self
-                .globals
-                .get(name)
-                .cloned()
+                .get_var(name)
                 .ok_or_else(|| self.fail(*p, &format!("undefined variable {:?}", name))),
             Ref::ObjField(o, k, _) => Ok(o.borrow().get(k).cloned().unwrap_or(Value::Null)),
             Ref::ArrElem(a, i, _) => {
@@ -440,7 +524,7 @@ impl<'a> Runtime<'a> {
     fn ref_set(&mut self, r: &Ref, v: Value) -> Result<(), Error> {
         match r {
             Ref::Var(name, _) => {
-                self.globals.insert(name.clone(), v);
+                self.set_var(name, v);
                 Ok(())
             }
             Ref::ObjField(o, k, _) => {
@@ -487,8 +571,70 @@ impl<'a> Runtime<'a> {
         for e in args {
             values.push(self.eval(e)?);
         }
-        match name {
-            "log" => {
+        let f = self
+            .get_var(name)
+            .ok_or_else(|| self.fail(p, &format!("unknown function {:?}", name)))?;
+        self.invoke(p, &f, &values)
+    }
+
+    fn invoke(&mut self, p: Pos, f: &Value, values: &[Value]) -> Result<Value, Error> {
+        match f {
+            Value::Builtin(b) => self.run_builtin(p, *b, values),
+            Value::Function(f) => match f.as_ref() {
+                Function::Native(n) => n(values).map_err(|msg| self.fail(p, &msg)),
+                Function::Closure(c) => self.invoke_closure(p, c, values),
+            },
+            _ => Err(self.fail(p, "value is not callable")),
+        }
+    }
+
+    fn invoke_closure(
+        &mut self,
+        p: Pos,
+        c: &Rc<crate::value::ClosureData>,
+        values: &[Value],
+    ) -> Result<Value, Error> {
+        let body = c
+            .body
+            .downcast_ref::<ArrowBody>()
+            .ok_or_else(|| self.fail(p, "internal error: invalid closure body"))?;
+        let parent: Rc<Env> = c
+            .env
+            .clone()
+            .downcast::<Env>()
+            .map_err(|_| self.fail(p, "internal error: invalid closure environment"))?;
+        if self.depth >= MAX_CALL_DEPTH {
+            return Err(self.fail(p, "maximum call stack depth exceeded"));
+        }
+        self.depth += 1;
+        let local = Env::new(Some(parent));
+        for (i, param) in c.params.iter().enumerate() {
+            let v = values.get(i).cloned().unwrap_or(Value::Null);
+            local.vars.borrow_mut().insert(param.clone(), v);
+        }
+        let saved_scope = self.scope.clone();
+        self.scope = local;
+        let result = self.run_arrow_body(p, body);
+        self.scope = saved_scope;
+        self.depth -= 1;
+        result
+    }
+
+    fn run_arrow_body(&mut self, p: Pos, body: &ArrowBody) -> Result<Value, Error> {
+        if !body.block {
+            let e = body.expr.as_ref().unwrap();
+            return self.eval(e);
+        }
+        match self.exec_list(&body.stmts)? {
+            Some(Signal::Return(v)) => Ok(v),
+            Some(_) => Err(self.fail(p, "control flow signal outside loop")),
+            None => Ok(Value::Null),
+        }
+    }
+
+    fn run_builtin(&mut self, p: Pos, b: Builtin, values: &[Value]) -> Result<Value, Error> {
+        match b {
+            Builtin::Log => {
                 let parts: Vec<String> = values.iter().map(value_string).collect();
                 let line = format!("{}\n", parts.join(" "));
                 let write_result = match self.output.as_deref_mut() {
@@ -500,7 +646,7 @@ impl<'a> Runtime<'a> {
                 }
                 Ok(Value::Null)
             }
-            "env" => {
+            Builtin::Env => {
                 if values.len() != 1 {
                     return Err(self.fail(p, "env expects 1 argument"));
                 }
@@ -513,20 +659,7 @@ impl<'a> Runtime<'a> {
                     .map(Value::String)
                     .unwrap_or(Value::Null))
             }
-            "typeof" => {
-                if values.len() != 1 {
-                    return Err(self.fail(p, "typeof expects 1 argument"));
-                }
-                let t = match &values[0] {
-                    Value::String(_) => "string",
-                    Value::Array(_) => "array",
-                    Value::Object(_) | Value::Null => "object",
-                    Value::Bool(_) => "boolean",
-                    Value::Number(_) => "number",
-                };
-                Ok(Value::String(t.to_string()))
-            }
-            "keys" => {
+            Builtin::Keys => {
                 if values.len() != 1 {
                     return Err(self.fail(p, "keys expects 1 argument"));
                 }
@@ -543,7 +676,6 @@ impl<'a> Runtime<'a> {
                     _ => Err(self.fail(p, "keys requires array or object")),
                 }
             }
-            _ => Err(self.fail(p, &format!("unknown function {:?}", name))),
         }
     }
 
@@ -564,6 +696,13 @@ impl<'a> Runtime<'a> {
                 return Err(self.fail(p, "toString expects no arguments"));
             }
             return Ok(Value::String(value_string(&recv)));
+        }
+        if let Value::Object(o) = &recv {
+            if let Some(member) = o.borrow().get(name) {
+                if matches!(member, Value::Function(_) | Value::Builtin(_)) {
+                    return self.invoke(p, member, &values);
+                }
+            }
         }
         if let Value::Array(a) = &recv {
             return self.array_method(p, a, name, &values);
@@ -1045,6 +1184,17 @@ fn truth(v: &Value) -> bool {
     }
 }
 
+fn type_of(v: &Value) -> &'static str {
+    match v {
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) | Value::Null => "object",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::Function(_) | Value::Builtin(_) => "function",
+    }
+}
+
 fn exists(v: &Value, key: &Value) -> bool {
     match v {
         Value::Array(a) => match index(key) {
@@ -1079,6 +1229,7 @@ fn value_string(v: &Value) -> String {
                 .collect();
             parts.join(",")
         }
+        Value::Function(_) | Value::Builtin(_) => "[Function]".to_string(),
         Value::Object(_) => match jsonc::marshal(v) {
             Ok(s) => s,
             Err(_) => format!("{:?}", v),

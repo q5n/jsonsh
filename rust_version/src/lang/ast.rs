@@ -2,7 +2,14 @@ use crate::value::Value;
 
 use super::token::{Pos, Tok};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct ArrowBody {
+    pub block: bool,
+    pub expr: Option<Box<Expr>>,
+    pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Expr {
     Literal(Pos, Value),
     Variable(Pos, String),
@@ -14,6 +21,7 @@ pub enum Expr {
     Member(Pos, Box<Expr>, Box<Expr>),
     Call(Pos, String, Vec<Expr>),
     MethodCall(Pos, Box<Expr>, String, Vec<Expr>),
+    Arrow(Pos, Vec<String>, Box<ArrowBody>),
 }
 
 impl Expr {
@@ -29,11 +37,12 @@ impl Expr {
             Expr::Member(p, _, _) => *p,
             Expr::Call(p, _, _) => *p,
             Expr::MethodCall(p, _, _, _) => *p,
+            Expr::Arrow(p, _, _) => *p,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Expr(Pos, Expr),
     Block(Pos, Vec<Stmt>),
@@ -49,6 +58,7 @@ pub enum Stmt {
     Delete(Pos, Expr),
     Break(Pos),
     Continue(Pos),
+    Return(Pos, Option<Box<Expr>>),
 }
 
 impl Stmt {
@@ -62,6 +72,7 @@ impl Stmt {
             Stmt::Delete(p, _) => *p,
             Stmt::Break(p) => *p,
             Stmt::Continue(p) => *p,
+            Stmt::Return(p, _) => *p,
         }
     }
 }

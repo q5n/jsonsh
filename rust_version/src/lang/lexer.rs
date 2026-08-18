@@ -43,7 +43,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             out.push(t);
             continue;
         }
-        let pairs: [(&str, Tok); 10] = [
+        let pairs: [(&str, Tok); 11] = [
             ("+=", Tok::PlusAssign),
             ("-=", Tok::MinusAssign),
             ("*=", Tok::StarAssign),
@@ -54,6 +54,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             ("<=", Tok::LE),
             ("&&", Tok::And),
             ("||", Tok::Or),
+            ("=>", Tok::Arrow),
         ];
         if l.off + 2 <= l.src.len() {
             let two = &l.src.as_bytes()[l.off..l.off + 2];
@@ -189,6 +190,8 @@ impl Lexer {
             "delete" => Some(Tok::Delete),
             "break" => Some(Tok::Break),
             "continue" => Some(Tok::Continue),
+            "return" => Some(Tok::Return),
+            "typeof" => Some(Tok::Typeof),
             _ => None,
         };
         match kw {

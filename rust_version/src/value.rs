@@ -1,11 +1,51 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::rc::Rc;
 
 use unicode_general_category::get_general_category;
 use unicode_general_category::GeneralCategory::*;
 
-#[derive(Clone, Debug, PartialEq)]
+pub type NativeFn = Rc<dyn Fn(&[Value]) -> Result<Value, String>>;
+
+pub struct ClosureData {
+    pub params: Vec<String>,
+    pub body: Rc<dyn Any>,
+    pub env: Rc<dyn Any>,
+}
+
+impl fmt::Debug for ClosureData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Closure")
+            .field("params", &self.params)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Builtin {
+    Log,
+    Env,
+    Keys,
+}
+
+#[derive(Clone)]
+pub enum Function {
+    Closure(Rc<ClosureData>),
+    Native(NativeFn),
+}
+
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Function::Closure(c) => f.debug_tuple("Closure").field(c).finish(),
+            Function::Native(_) => f.write_str("Native"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -13,6 +53,26 @@ pub enum Value {
     String(String),
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<BTreeMap<String, Value>>>),
+    Function(Rc<Function>),
+    Builtin(Builtin),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Null, Value::Null) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow(),
+            (Value::Object(a), Value::Object(b)) => {
+                Rc::ptr_eq(a, b) || *a.borrow() == *b.borrow()
+            }
+            (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            (Value::Builtin(a), Value::Builtin(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Value {
@@ -28,8 +88,26 @@ impl Value {
         Value::Object(Rc::new(RefCell::new(entries.into_iter().collect())))
     }
 
+    pub fn closure(params: Vec<String>, body: Rc<dyn Any>, env: Rc<dyn Any>) -> Value {
+        Value::Function(Rc::new(Function::Closure(Rc::new(ClosureData {
+            params,
+            body,
+            env,
+        }))))
+    }
+
+    pub fn native(f: impl Fn(&[Value]) -> Result<Value, String> + 'static) -> Value {
+        Value::Function(Rc::new(Function::Native(Rc::new(f))))
+    }
+
+    pub fn builtin(b: Builtin) -> Value {
+        Value::Builtin(b)
+    }
+
     /// Deep copy: allocates fresh aggregate containers so that mutating the
     /// result never affects the source value (mirrors jsonc.Clone + importValue).
+    /// Function values are shared by reference (their captured environment has
+    /// reference semantics like arrays/objects).
     pub fn deep_clone(&self) -> Value {
         match self {
             Value::Null => Value::Null,
@@ -43,6 +121,8 @@ impl Value {
                     .map(|(k, v)| (k.clone(), v.deep_clone()))
                     .collect(),
             ),
+            Value::Function(f) => Value::Function(f.clone()),
+            Value::Builtin(b) => Value::Builtin(*b),
         }
     }
 }

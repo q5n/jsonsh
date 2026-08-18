@@ -823,7 +823,6 @@ fn new_method_argument_errors() {
         ("\"x\".padStart(3, 1);", "padding must be a string"),
         ("[1].join(2);", "separator must be a string"),
         ("[1].splice();", "at least 1 argument"),
-        ("typeof();", "expects 1 argument"),
         ("true.toString(1);", "expects no arguments"),
     ];
     for (code, want) in cases {
@@ -1356,4 +1355,368 @@ fn chinese_for_of_iterates_code_points() {
     if let Value::Object(o) = &r {
         assert_eq!(o.borrow().get("out"), Some(&arr(vec![s("中"), s("文")])));
     }
+}
+
+#[test]
+fn arrow_expression_body_forms() {
+    let (_, last) = run("f = (a, b) => a + b; '' + f", obj(vec![]));
+    assert_eq!(last, Some(s("[Function]")), "arrow stringifies");
+
+    let (_, last) = run("add = (a, b) => a + b; add(2, 3)", obj(vec![]));
+    assert_eq!(last, Some(num(5.0)));
+
+    let (_, last) = run("square = x => x * x; square(4)", obj(vec![]));
+    assert_eq!(last, Some(num(16.0)));
+
+    let (_, last) = run("one = () => 42; one()", obj(vec![]));
+    assert_eq!(last, Some(num(42.0)));
+}
+
+#[test]
+fn arrow_block_body_and_return() {
+    let code = "f = (n) => { return n + 1 }; f(10)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(11.0)));
+
+    let code = "g = () => { return; }; g()";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(Value::Null));
+
+    let code = "h = (n) => { if (n > 0) return n; }; h(0)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(Value::Null));
+}
+
+#[test]
+fn arrow_arg_arity_rules() {
+    let (_, last) = run("f = (a) => a; f()", obj(vec![]));
+    assert_eq!(last, Some(Value::Null), "missing arg is null");
+
+    let (_, last) = run("f = (a) => a; f(1, 2, 3)", obj(vec![]));
+    assert_eq!(last, Some(num(1.0)), "extra args ignored");
+}
+
+#[test]
+fn arrow_lexical_closure() {
+    let code = "makeAdder = x => (y => x + y); add5 = makeAdder(5); add5(3)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(8.0)));
+
+    let code = "counter = () => { n = n + 1; return n }; n = 0; counter(); counter()";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(2.0)), "closure mutates shared global");
+}
+
+#[test]
+fn arrow_recursion_via_named_variable() {
+    let code = "fact = n => { if (n <= 1) return 1; return n * fact(n - 1) }; fact(5)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(120.0)));
+}
+
+#[test]
+fn builtins_can_be_shadowed() {
+    let mut output = Vec::new();
+    let code = "log = x => x + 1; log(10)";
+    let (_, last) =
+        lang::execute_with_output(code, obj(vec![]), 1000, &mut output).unwrap();
+    assert_eq!(last, Some(num(11.0)));
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "",
+        "shadowed log must not write output"
+    );
+
+    let (_, last) = run("keys = x => x; keys(9)", obj(vec![]));
+    assert_eq!(last, Some(num(9.0)));
+}
+
+#[test]
+fn function_value_behaviors() {
+    let (r, last) = run("f = x => x; $.f = f; typeof f", obj(vec![]));
+    assert_eq!(last, Some(s("function")));
+    if let Value::Object(o) = &r {
+        assert!(matches!(o.borrow().get("f"), Some(Value::Function(_))));
+    } else {
+        panic!("not object");
+    }
+
+    let (_, last) = run("f = () => 1; '' + f", obj(vec![]));
+    assert_eq!(last, Some(s("[Function]")));
+
+    let (r, _) = run("$.cb = () => 1", obj(vec![]));
+    let out = jsonsh::jsonc::marshal(&r).unwrap();
+    assert_eq!(out, "{\"cb\":null}", "function marshals to null");
+
+    let (_, last) = run("f = () => 1; if (f) 1 else 0", obj(vec![]));
+    assert_eq!(last, Some(num(1.0)), "function is truthy");
+}
+
+#[test]
+fn object_method_call_arrow() {
+    let code = "$.o.f = x => x + 1; $.o.f(10)";
+    let (_, last) = run(code, obj(vec![("o", obj(vec![]))]));
+    assert_eq!(last, Some(num(11.0)));
+}
+
+#[test]
+fn return_outside_function_errors() {
+    let e = execute("return 1", obj(vec![]), 100);
+    match e {
+        Err(err) => assert!(err.to_string().contains("return outside function"), "{:?}", err),
+        Ok(_) => panic!("should error"),
+    }
+}
+
+#[test]
+fn typeof_expression_and_function() {
+    let (_, last) = run("typeof (() => 1)", obj(vec![]));
+    assert_eq!(last, Some(s("function")));
+
+    let (_, last) = run("typeof typeof 1", obj(vec![]));
+    assert_eq!(last, Some(s("string")));
+}
+
+#[test]
+fn arrow_return_propagates_through_loop() {
+    let code = "f = () => { for (i = 0; i < 5; i += 1) { if (i == 3) return i; } return -1 }; f()";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(3.0)));
+}
+
+#[test]
+fn arrow_empty_block_body_returns_null() {
+    let (_, last) = run("f = () => {}; f()", obj(vec![]));
+    assert_eq!(last, Some(Value::Null));
+}
+
+#[test]
+fn arrow_block_without_return_returns_null() {
+    let (_, last) = run("f = (x) => { x + 1 }; f(10)", obj(vec![]));
+    assert_eq!(last, Some(Value::Null));
+}
+
+#[test]
+fn arrow_return_first_wins() {
+    let (_, last) = run("f = () => { return 1; return 2 }; f()", obj(vec![]));
+    assert_eq!(last, Some(num(1.0)));
+}
+
+#[test]
+fn arrow_function_reference_identity_and_equality() {
+    let (_, last) = run("f = () => 1; g = f; g == f", obj(vec![]));
+    assert_eq!(last, Some(Value::Bool(true)));
+
+    let (_, last) = run("a = () => 1; b = () => 1; a == b", obj(vec![]));
+    assert_eq!(last, Some(Value::Bool(false)));
+}
+
+#[test]
+fn arrow_passed_as_callback() {
+    let code = "apply = (f, x) => f(x); apply(y => y * 10, 5)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(50.0)));
+
+    let code = "map = (f, a) => { for (i = 0; i < a.length; i += 1) a[i] = f(a[i]); return a }; map(x => x * 10, [1, 2, 3])";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(arr(vec![num(10.0), num(20.0), num(30.0)])));
+}
+
+#[test]
+fn arrow_closure_captures_outer_variables() {
+    let code = "make = (base) => (x => base + x); add10 = make(10); add10(5)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(15.0)));
+}
+
+#[test]
+fn arrow_captures_variable_by_reference() {
+    let (_, last) = run("x = 10; f = () => x; x = 20; f()", obj(vec![]));
+    assert_eq!(last, Some(num(20.0)));
+}
+
+#[test]
+fn arrow_parameter_shadows_outer() {
+    let (_, last) = run("x = 1; f = (x) => { return x }; f(99)", obj(vec![]));
+    assert_eq!(last, Some(num(99.0)));
+    let (_, last) = run("x = 1; f = (x) => { return x }; f(99); x", obj(vec![]));
+    assert_eq!(last, Some(num(1.0)), "outer x unchanged after param shadow");
+}
+
+#[test]
+fn arrow_assignment_to_param_is_local() {
+    let (_, last) = run("f = (a) => { a = 99; return a }; f(1)", obj(vec![]));
+    assert_eq!(last, Some(num(99.0)));
+}
+
+#[test]
+fn arrow_nested_closure() {
+    let code = "f = x => y => z => x + y + z; g = f(1); h = g(2); h(3)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(6.0)));
+}
+
+#[test]
+fn arrow_return_object_literal() {
+    let code = "f = () => ({ a: 1 }); f().a";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(1.0)));
+}
+
+#[test]
+fn non_function_value_called_is_runtime_error() {
+    let e = execute("x = 1; x()", obj(vec![]), 100);
+    assert!(e.is_err(), "calling non-function should error");
+
+    let e = execute("log = 5; log(1)", obj(vec![]), 100);
+    assert!(e.is_err(), "shadowing with non-function then calling should error");
+}
+
+#[test]
+fn break_continue_outside_loop_inside_function_errors() {
+    let e = execute("f = () => { break }; f()", obj(vec![]), 100);
+    assert!(e.is_err(), "break outside loop should error");
+
+    let e = execute("f = () => { continue }; f()", obj(vec![]), 100);
+    assert!(e.is_err(), "continue outside loop should error");
+}
+
+#[test]
+fn return_in_if_without_function_errors() {
+    let e = execute("if (true) return 1", obj(vec![]), 100);
+    assert!(e.is_err(), "return in brace-less if outside function should error");
+}
+
+#[test]
+fn max_call_depth_exceeded() {
+    let e = execute("f = () => f(); f()", obj(vec![]), 1_000_000);
+    match e {
+        Err(err) => assert!(
+            err.to_string().contains("maximum call stack depth exceeded"),
+            "{:?}",
+            err
+        ),
+        Ok(_) => panic!("should error on infinite recursion"),
+    }
+}
+
+#[test]
+fn typeof_function_returns_function() {
+    let cases = [
+        ("typeof (() => 1)", "function"),
+        ("typeof (x => x)", "function"),
+        ("typeof log", "function"),
+        ("typeof ((a, b) => a + b)", "function"),
+    ];
+    for (code, want) in cases {
+        let (_, last) = run(code, obj(vec![]));
+        assert_eq!(last, Some(s(want)), "{}", code);
+    }
+}
+
+#[test]
+fn typeof_preserves_existing_types() {
+    let cases = [
+        ("typeof 1", "number"),
+        ("typeof 'x'", "string"),
+        ("typeof true", "boolean"),
+        ("typeof null", "object"),
+        ("typeof [1]", "array"),
+        ("typeof ({})", "object"),
+    ];
+    for (code, want) in cases {
+        let (_, last) = run(code, obj(vec![]));
+        assert_eq!(last, Some(s(want)), "{}", code);
+    }
+}
+
+#[test]
+fn function_in_array_join_and_log() {
+    let (_, last) = run("[() => 1, 2].join(',')", obj(vec![]));
+    assert_eq!(last, Some(s("[Function],2")));
+
+    let mut output = Vec::new();
+    lang::execute_with_output("log(() => 1)", obj(vec![]), 1000, &mut output).unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "[Function]\n",
+        "logging a function prints [Function]"
+    );
+}
+
+#[test]
+fn function_in_compact_output_is_null() {
+    let (r, _) = run("$.fns = [() => 1, () => 2]", obj(vec![]));
+    let out = jsonsh::jsonc::marshal(&r).unwrap();
+    assert_eq!(out, "{\"fns\":[null,null]}");
+}
+
+#[test]
+fn arrow_as_loop_body() {
+    let (r, _) = run(
+        "for (i = 0; i < 3; i += 1) f = i; $.last = f",
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("last"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn arrow_return_propagates_through_nested_if() {
+    let code = "f = (x) => { if (x > 0) { if (x > 10) return 'big'; return 'small'; } return 'neg' }; f(5)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(s("small")));
+    let (_, last) = run(&code.replace("f(5)", "f(20)"), obj(vec![]));
+    assert_eq!(last, Some(s("big")));
+}
+
+#[test]
+fn arrow_return_through_for_of() {
+    let code = "f = () => { for (c of 'ab') return c }; f()";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(s("a")));
+}
+
+#[test]
+fn arrow_deep_recursion_within_limit_succeeds() {
+    let code = "f = (n) => { if (n <= 0) return 0; return 1 + f(n - 1) }; f(50)";
+    let (_, last) = run(code, obj(vec![]));
+    assert_eq!(last, Some(num(50.0)));
+}
+
+#[test]
+fn arrow_accesses_root_dollar() {
+    let (_, last) = run("f = () => $.x; f()", obj(vec![("x", num(42.0))]));
+    assert_eq!(last, Some(num(42.0)));
+}
+
+#[test]
+fn arrow_mutates_root() {
+    let (r, _) = run("f = () => { $.a = 1 }; f()", obj(vec![]));
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(1.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn arrow_builtin_env_keys_still_work() {
+    let (_, last) = run("keys({ b: 1, a: 2 })", obj(vec![]));
+    assert_eq!(last, Some(arr(vec![s("a"), s("b")])));
+}
+
+#[test]
+fn builtin_function_is_truthy() {
+    let (_, last) = run("if (log) 1 else 0", obj(vec![]));
+    assert_eq!(last, Some(num(1.0)));
+}
+
+#[test]
+fn arrow_multiple_params_and_string_concat() {
+    let (_, last) = run("greet = (name, age) => name + ':' + age; greet('Tom', 30)", obj(vec![]));
+    assert_eq!(last, Some(s("Tom:30")));
 }

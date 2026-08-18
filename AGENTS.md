@@ -17,14 +17,14 @@ Windows shell is PowerShell 7 (`Get-ChildItem`, not `ls -la`). Bash scripts (`re
 
 Rust (`rust_version/src/`):
 
-- `value.rs` — the unified `Value` enum (`Null/Bool/Number/String/Array/Object`); arrays and objects are `Rc<RefCell<...>>` for reference semantics. `deep_clone()` gives parse→runtime isolation. Also holds `is_letter`/`is_digit`/`is_print` (ASCII letter/digit plus a printability check classifying L/M/N/P/S as printable, mirroring Go's `unicode.IsPrint`).
+- `value.rs` — the unified `Value` enum (`Null/Bool/Number/String/Array/Object/Function/Builtin`); arrays and objects are `Rc<RefCell<...>>` for reference semantics. `Function(Rc<Function>)` holds `Function::Closure` (AST body + captured env) or `Function::Native` (builtins like `log`/`keys`/`env`); both stored as `Rc<dyn Any>` to keep `value` independent of `lang`. `deep_clone()` shares functions (immutable). Also holds `is_letter`/`is_digit`/`is_print` (ASCII letter/digit plus a printability check classifying L/M/N/P/S as printable, mirroring Go's `unicode.IsPrint`).
 - `jsonc/mod.rs` — JSONC parser + source-preserving renderer (`Document::preserve`/`render` reuse original source bytes for unchanged nodes).
-- `jsonc/encode.rs` — `marshal`/`append_json_string`/`format_float` (custom JSON escaping + float formatting that switches to `e` notation for |f|<1e-6 or ≥1e21).
-- `lang/` — interpreter (`lexer.rs`, `parser.rs`, `ast.rs`, `eval.rs`, `token.rs`). Root variable is `$`; numbers are `f64`.
+- `jsonc/encode.rs` — `marshal`/`append_json_string`/`format_float` (custom JSON escaping + float formatting that switches to `e` notation for |f|<1e-6 or ≥1e21). Functions marshal to `null` (not a JSON type).
+- `lang/` — interpreter (`lexer.rs`, `parser.rs`, `ast.rs`, `eval.rs`, `token.rs`). Root variable is `$`; numbers are `f64`. Supports arrow functions (`(a,b) => expr` / `(a,b) => { ... return ... }` / `x => expr` / `() => expr`) with lexical closures, `return`, and a `MAX_CALL_DEPTH = 64` recursion guard. `typeof` is a prefix unary expression (not a builtin function); `log`/`env`/`keys` remain shadowable builtin globals. Only bare names and `obj.method()` are callable (no IIFE, no `f(1)(2)`).
 - `cli.rs` + `main.rs` — CLI entry (`expand_short_options`, output dispatch `-r/-c/-p/-n`, `replace_file`).
 - `tests/{jsonc,lang,cli}.rs` — integration tests.
 
-Dependency direction is one-way: `lang` → `jsonc` → stdlib. No cycles.
+Dependency direction is one-way: `lang` → `jsonc` → `value`. No cycles. Functions break the would-be cycle (`value` can't name `lang` types) via `Rc<dyn Any>` downcasting in `eval::invoke_closure`.
 
 ## Critical gotchas
 

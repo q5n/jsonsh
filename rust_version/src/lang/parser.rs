@@ -1,6 +1,6 @@
 use crate::value::Value;
 
-use super::ast::{Expr, Program, Stmt};
+use super::ast::{ArrowBody, Expr, Program, Stmt};
 use super::token::{Error, Pos, Tok, Token};
 
 struct Parser {
@@ -99,6 +99,20 @@ impl Parser {
                 }
                 self.end_stmt()?;
                 Ok(Stmt::Continue(t.pos))
+            }
+            Tok::Return => {
+                self.next();
+                let v = if self.peek().kind == Tok::Semi
+                    || self.peek().kind == Tok::RBrace
+                    || self.peek().kind == Tok::Eof
+                    || self.has_line_break()
+                {
+                    None
+                } else {
+                    Some(Box::new(self.expression()?))
+                };
+                self.end_stmt()?;
+                Ok(Stmt::Return(t.pos, v))
             }
             _ => {
                 let x = self.expression()?;
@@ -288,7 +302,10 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, Error> {
-        if self.peek().kind == Tok::Bang || self.peek().kind == Tok::Minus {
+        if self.peek().kind == Tok::Bang
+            || self.peek().kind == Tok::Minus
+            || self.peek().kind == Tok::Typeof
+        {
             let t = self.next();
             let x = self.unary()?;
             return Ok(Expr::Unary(t.pos, t.kind, Box::new(x)));
@@ -350,6 +367,11 @@ impl Parser {
             Tok::Null => Ok(Expr::Literal(t.pos, Value::Null)),
             Tok::Dollar => Ok(Expr::Variable(t.pos, "$".to_string())),
             Tok::Ident => {
+                if self.peek().kind == Tok::Arrow {
+                    self.need(Tok::Arrow, "expected '=>'")?;
+                    let body = self.arrow_body()?;
+                    return Ok(Expr::Arrow(t.pos, vec![t.lit], Box::new(body)));
+                }
                 if self.match_kind(Tok::LParen) {
                     let args = self.call_args()?;
                     Ok(Expr::Call(t.pos, t.lit, args))
@@ -358,6 +380,9 @@ impl Parser {
                 }
             }
             Tok::LParen => {
+                if self.follows_arrow_param_list() {
+                    return self.arrow_expr(t.pos);
+                }
                 let x = self.expression()?;
                 self.need(Tok::RParen, "expected ')'")?;
                 Ok(x)
@@ -402,6 +427,70 @@ impl Parser {
                 Ok(Expr::Object(t.pos, xs))
             }
             _ => Err(self.err(&t, &format!("unexpected token {:?}", t.lit))),
+        }
+    }
+
+    fn follows_arrow_param_list(&self) -> bool {
+        let mut j = self.i;
+        if self.ts.get(j).map(|t| t.kind) == Some(Tok::RParen) {
+            j += 1;
+            return self.ts.get(j).map(|t| t.kind) == Some(Tok::Arrow);
+        }
+        loop {
+            match self.ts.get(j).map(|t| t.kind) {
+                Some(Tok::Ident) => j += 1,
+                _ => return false,
+            }
+            match self.ts.get(j).map(|t| t.kind) {
+                Some(Tok::Comma) => {
+                    j += 1;
+                    continue;
+                }
+                Some(Tok::RParen) => {
+                    j += 1;
+                    return self.ts.get(j).map(|t| t.kind) == Some(Tok::Arrow);
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    fn arrow_expr(&mut self, pos: Pos) -> Result<Expr, Error> {
+        let mut params = Vec::new();
+        if !self.match_kind(Tok::RParen) {
+            loop {
+                let n = self.need(Tok::Ident, "expected parameter name")?;
+                params.push(n.lit);
+                if self.match_kind(Tok::RParen) {
+                    break;
+                }
+                self.need(Tok::Comma, "expected ',' or ')'")?;
+            }
+        }
+        self.need(Tok::Arrow, "expected '=>'")?;
+        let body = self.arrow_body()?;
+        Ok(Expr::Arrow(pos, params, Box::new(body)))
+    }
+
+    fn arrow_body(&mut self) -> Result<ArrowBody, Error> {
+        if self.peek().kind == Tok::LBrace {
+            let b = self.block()?;
+            let stmts = match b {
+                Stmt::Block(_, xs) => xs,
+                _ => unreachable!(),
+            };
+            Ok(ArrowBody {
+                block: true,
+                expr: None,
+                stmts,
+            })
+        } else {
+            let e = self.expression()?;
+            Ok(ArrowBody {
+                block: false,
+                expr: Some(Box::new(e)),
+                stmts: Vec::new(),
+            })
         }
     }
 
