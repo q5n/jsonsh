@@ -45,25 +45,50 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             out.push(t);
             continue;
         }
-        // three-char operator `>>>`
-        if l.off + 3 <= l.src.len() && &l.src.as_bytes()[l.off..l.off + 3] == b">>>" {
+        // four-char operator `>>>=`
+        if l.off + 4 <= l.src.len() && &l.src.as_bytes()[l.off..l.off + 4] == b">>>=" {
             out.push(Token {
-                kind: Tok::UShr,
-                lit: ">>>".to_string(),
+                kind: Tok::UShrAssign,
+                lit: ">>>=".to_string(),
                 pos: p,
                 offset,
             });
-            l.advance();
-            l.advance();
-            l.advance();
+            for _ in 0..4 {
+                l.advance();
+            }
             continue;
         }
-        let pairs: [(&str, Tok); 17] = [
+        // three-char operators `>>>`, `<<=`, `>>=`
+        if l.off + 3 <= l.src.len() {
+            let three = &l.src.as_bytes()[l.off..l.off + 3];
+            let kind = match three {
+                b">>>" => Some(Tok::UShr),
+                b"<<=" => Some(Tok::ShlAssign),
+                b">>=" => Some(Tok::ShrAssign),
+                _ => None,
+            };
+            if let Some(k) = kind {
+                out.push(Token {
+                    kind: k,
+                    lit: String::from_utf8_lossy(three).into_owned(),
+                    pos: p,
+                    offset,
+                });
+                l.advance();
+                l.advance();
+                l.advance();
+                continue;
+            }
+        }
+        let pairs: [(&str, Tok); 20] = [
             ("+=", Tok::PlusAssign),
             ("-=", Tok::MinusAssign),
             ("*=", Tok::StarAssign),
             ("/=", Tok::SlashAssign),
             ("%=", Tok::PercentAssign),
+            ("&=", Tok::BitAndAssign),
+            ("|=", Tok::BitOrAssign),
+            ("^=", Tok::BitXorAssign),
             ("==", Tok::Eq),
             ("!=", Tok::Ne),
             (">=", Tok::GE),

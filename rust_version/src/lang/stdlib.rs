@@ -642,7 +642,7 @@ pub fn to_str(v: &Value) -> String {
     }
 }
 
-fn to_number(v: Option<&Value>) -> f64 {
+pub(crate) fn to_number(v: Option<&Value>) -> f64 {
     match v {
         None => 0.0,
         Some(Value::Number(n)) => *n,

@@ -369,6 +369,7 @@ impl<'a> Runtime<'a> {
                 let v = self.eval(x)?;
                 match op {
                     Tok::Bang => Ok(Value::Bool(!truth(&v))),
+                    Tok::Plus => Ok(Value::Number(super::stdlib::to_number(Some(&v)))),
                     Tok::BitNot => match v {
                         Value::Number(n) => Ok(Value::Number(!to_int32(n) as f64)),
                         _ => Err(self.fail(*p, "unary '~' requires number")),
@@ -607,6 +608,12 @@ impl<'a> Runtime<'a> {
                 Tok::StarAssign => Tok::Star,
                 Tok::SlashAssign => Tok::Slash,
                 Tok::PercentAssign => Tok::Percent,
+                Tok::BitAndAssign => Tok::BitAnd,
+                Tok::BitOrAssign => Tok::BitOr,
+                Tok::BitXorAssign => Tok::BitXor,
+                Tok::ShlAssign => Tok::Shl,
+                Tok::ShrAssign => Tok::Shr,
+                Tok::UShrAssign => Tok::UShr,
                 _ => Tok::Plus,
             };
             v = self.apply(p, apply_op, &old, &v)?;

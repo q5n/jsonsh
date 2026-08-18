@@ -332,6 +332,7 @@ impl Parser {
     fn unary(&mut self) -> Result<Expr, Error> {
         if self.peek().kind == Tok::Bang
             || self.peek().kind == Tok::Minus
+            || self.peek().kind == Tok::Plus
             || self.peek().kind == Tok::Typeof
             || self.peek().kind == Tok::BitNot
         {
@@ -676,6 +677,12 @@ fn is_assign_op(k: Tok) -> bool {
             | Tok::StarAssign
             | Tok::SlashAssign
             | Tok::PercentAssign
+            | Tok::BitAndAssign
+            | Tok::BitOrAssign
+            | Tok::BitXorAssign
+            | Tok::ShlAssign
+            | Tok::ShrAssign
+            | Tok::UShrAssign
     )
 }
 

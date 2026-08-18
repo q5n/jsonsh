@@ -522,9 +522,9 @@ Differences from JavaScript\n\
   Date is UTC-only (no local timezone); no exceptions, errors carry a position\n\
 \n\
 Operators (JS precedence, highest to lowest)\n\
-  ++ --    ! - ~ typeof      * / %      + -      << >> >>>\n\
+  ++ --    ! - + ~ typeof      * / %      + -      << >> >>>\n\
   < <= > >=    == !=     &     ^     |     &&     ||     ?:\n\
-  = += -= *= /= %=\n\
+  = += -= *= /= %= &= |= ^= <<= >>= >>>=\n\
   Optional chaining ?. short-circuits to null when a receiver is null.\n\
 \n\
 Statements\n\

@@ -1747,6 +1747,87 @@ fn arrow_builtin_object_keys_still_work() {
 }
 
 #[test]
+fn bitwise_compound_assignments() {
+    let (r, _) = run(
+        r#"
+		$.and = 6; $.and &= 3;
+		$.or = 6; $.or |= 1;
+		$.xor = 6; $.xor ^= 2;
+		$.shl = 1; $.shl <<= 4;
+		$.shr = -16; $.shr >>= 2;
+		$.ushr = -1; $.ushr >>>= 0;
+	"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("and"), Some(&num(2.0)));
+        assert_eq!(m.get("or"), Some(&num(7.0)));
+        assert_eq!(m.get("xor"), Some(&num(4.0)));
+        assert_eq!(m.get("shl"), Some(&num(16.0)));
+        assert_eq!(m.get("shr"), Some(&num(-4.0)));
+        assert_eq!(m.get("ushr"), Some(&num(4294967295.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn bitwise_compound_assignments_on_members() {
+    let (r, _) = run(
+        r#"
+		$.a = [1, 2];
+		$.a[0] |= 8;
+		$.o = {k: 6};
+		$.o.k ^= 2;
+	"#,
+        obj(vec![]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("a"), Some(&arr(vec![num(9.0), num(2.0)])));
+        assert_eq!(
+            m.get("o"),
+            Some(&obj(vec![("k", num(4.0))]))
+        );
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn unary_plus_coerces_to_number() {
+    let cases = [
+        ("+3.5", 3.5),
+        ("+true", 1.0),
+        ("+false", 0.0),
+        ("+null", 0.0),
+        ("+''", 0.0),
+        ("+'  42 '", 42.0),
+        ("+-4", -4.0),
+    ];
+    for (code, want) in cases {
+        let (_, last) = run(code, obj(vec![]));
+        assert_eq!(last, Some(num(want)), "code: {}", code);
+    }
+    let (_, last) = run("+'abc'", obj(vec![]));
+    match last {
+        Some(Value::Number(n)) => assert!(n.is_nan()),
+        other => panic!("expected NaN, got {:?}", other),
+    }
+}
+
+#[test]
+fn unary_plus_on_root_field() {
+    let (r, _) = run("$.n = +'7'", obj(vec![]));
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("n"), Some(&num(7.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
 fn builtin_function_is_truthy() {
     let (_, last) = run("if (log) 1 else 0", obj(vec![]));
     assert_eq!(last, Some(num(1.0)));
