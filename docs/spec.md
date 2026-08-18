@@ -24,23 +24,27 @@ An assignment target must be a variable or member expression. Compound assignmen
 
 ## Statements
 
-Statements are separated by semicolons or line breaks. A line break separates statements after a complete expression; syntactically incomplete expressions can continue on following lines. The final semicolon in a block, or immediately before `}`, may be omitted. Control-flow bodies must use braces.
+Statements are separated by semicolons or line breaks. A line break separates statements after a complete expression; syntactically incomplete expressions can continue on following lines. The final semicolon in a block, or immediately before `}`, may be omitted. Control-flow bodies may be a braced block or a single statement on the same logical line; a brace-less body ends at a semicolon, a line break, or an `else` keyword.
 
 ```js
 if (condition) { ... } else if (condition) { ... } else { ... }
+if (condition) statement
+if (condition) statement else statement
 for (key in object) { ... }
-for (index in array) { ... }
-for (value of array) { ... }
-for (character of string) { ... }
-for (initializer; condition; update) { ... }
+for (index in array) statement
+for (value of array) statement
+for (character of string) statement
+for (initializer; condition; update) statement
 delete object.member;
 break;
 continue;
 ```
 
+A brace-less body contains exactly one statement, so control-flow statements may nest as bodies (e.g. `if (a) for (x of xs) { ... }`). A dangling `else` binds to the nearest preceding `if`.
+
 `for..in` iterates over numeric array indexes or object keys in lexicographic order. A key snapshot is created when the loop starts, and members deleted before their turn are skipped. `for..of` iterates over array values or Unicode code points in a string. Its source expression is evaluated once. Array iteration is live: each iteration reads the current length and current element, so `splice`, deletion, and `push` affect later iterations. Loop variables live in global scope. `break` and `continue` apply only to the nearest enclosing loop and are errors outside a loop. Deleting an array element shifts subsequent elements toward the beginning. Deleting a missing member is an error. Regular variables and `$` cannot be deleted. Empty statements are allowed, including repeated semicolons and semicolons following blocks.
 
-The traditional `for (initializer; condition; update) { ... }` loop evaluates the optional initializer once before the loop. Each iteration evaluates the optional condition; an omitted condition is `true`. The body runs only when the condition is truthy. After a normal body completion or `continue`, the optional update expression runs before the next condition check. `break` exits without running the update. The initializer and update are single expressions such as `i = 0` or `i += 1`; block declarations (`let`/`var`), comma expressions, postfix `++`/`--`, and brace-less bodies are not supported.
+The traditional `for (initializer; condition; update) { ... }` loop evaluates the optional initializer once before the loop. Each iteration evaluates the optional condition; an omitted condition is `true`. The body runs only when the condition is truthy. After a normal body completion or `continue`, the optional update expression runs before the next condition check. `break` exits without running the update. The initializer and update are single expressions such as `i = 0` or `i += 1`; block declarations (`let`/`var`), comma expressions, and postfix `++`/`--` are not supported.
 
 ## Built-in functions and methods
 

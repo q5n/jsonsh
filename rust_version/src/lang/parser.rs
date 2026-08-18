@@ -125,6 +125,7 @@ impl Parser {
         if self.match_kind(Tok::Semi)
             || self.peek().kind == Tok::RBrace
             || self.peek().kind == Tok::Eof
+            || self.peek().kind == Tok::Else
             || self.has_line_break()
         {
             return Ok(());
@@ -162,18 +163,34 @@ impl Parser {
         Ok(Stmt::Block(t.pos, xs))
     }
 
+    fn body(&mut self) -> Result<Stmt, Error> {
+        if self.peek().kind == Tok::LBrace {
+            self.block()
+        } else if self.match_kind(Tok::Semi) {
+            let pos = if self.i > 0 {
+                self.ts[self.i - 1].pos
+            } else {
+                self.peek().pos
+            };
+            Ok(Stmt::Block(pos, vec![]))
+        } else {
+            let s = self.stmt()?;
+            Ok(Stmt::Block(s.pos(), vec![s]))
+        }
+    }
+
     fn if_stmt(&mut self) -> Result<Stmt, Error> {
         let t = self.next();
         self.need(Tok::LParen, "expected '(' after if")?;
         let c = self.expression()?;
         self.need(Tok::RParen, "expected ')' after condition")?;
-        let b = self.block()?;
+        let b = self.body()?;
         let mut alt = None;
         if self.match_kind(Tok::Else) {
             alt = Some(if self.peek().kind == Tok::If {
                 Box::new(self.if_stmt()?)
             } else {
-                Box::new(self.block()?)
+                Box::new(self.body()?)
             });
         }
         Ok(Stmt::If(t.pos, c, Box::new(b), alt))
@@ -203,7 +220,7 @@ impl Parser {
             let src = self.expression()?;
             self.need(Tok::RParen, "expected ')' after source")?;
             self.loops += 1;
-            let b = self.block();
+            let b = self.body();
             self.loops -= 1;
             let b = b?;
             return Ok(Stmt::For(t.pos, n.lit, of, src, Box::new(b)));
@@ -227,7 +244,7 @@ impl Parser {
         };
         self.need(Tok::RParen, "expected ')' after for update")?;
         self.loops += 1;
-        let b = self.block();
+        let b = self.body();
         self.loops -= 1;
         let b = b?;
         Ok(Stmt::ForC(

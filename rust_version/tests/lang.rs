@@ -993,16 +993,219 @@ fn block_comments_in_script() {
 }
 
 #[test]
-fn brace_less_if_reports_expected_brace_error() {
-    let e = execute("if (true) $.a = 1;", obj(vec![]), 100);
-    match e {
-        Err(err) => assert!(
-            err.to_string().contains("expected '}'"),
-            "error={:?}",
-            err
-        ),
-        Ok(_) => panic!("should error"),
+fn brace_less_if_single_line() {
+    let (r, _) = run("if ($.x > 0) $.a = 1;", obj(vec![("x", num(1.0))]));
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(1.0)));
+    } else {
+        panic!("not object");
     }
+
+    let (r, _) = run("if ($.x > 0) $.a = 1; else $.a = 2;", obj(vec![("x", num(0.0))]));
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_if_else_same_line() {
+    let (r, _) = run(
+        "if ($.x > 0) $.a = 1 else $.a = 2",
+        obj(vec![("x", num(5.0))]),
+    );
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(1.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_if_newline_else_binds() {
+    let (r, _) = run(
+        "if ($.x > 0)\n  $.a = 1\nelse\n  $.a = 2",
+        obj(vec![("x", num(0.0))]),
+    );
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_else_if_chain() {
+    let code = "if ($.x == 1) $.a = 1\nelse if ($.x == 2) $.a = 2\nelse $.a = 9";
+    let (r, _) = run(code, obj(vec![("x", num(2.0))]));
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_nested_if_dangling_else() {
+    let code = "if ($.outer) if ($.inner) $.a = 1 else $.a = 2";
+    let (r, _) = run(
+        code,
+        obj(vec![("outer", Value::Bool(true)), ("inner", Value::Bool(false))]),
+    );
+    if let Value::Object(o) = &r {
+        assert_eq!(o.borrow().get("a"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+
+    let (r, _) = run(
+        code,
+        obj(vec![("outer", Value::Bool(false)), ("inner", Value::Bool(true))]),
+    );
+    if let Value::Object(o) = &r {
+        assert!(o.borrow().get("a").is_none());
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_for_loops() {
+    let code = "for (k in $.src) $.dst[k] = $.src[k]";
+    let (r, _) = run(
+        code,
+        obj(vec![
+            ("src", obj(vec![("a", num(1.0)), ("b", num(2.0))])),
+            ("dst", obj(vec![])),
+        ]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        let dst = m.get("dst").unwrap();
+        if let Value::Object(d) = dst {
+            let dm = d.borrow();
+            assert_eq!(dm.get("a"), Some(&num(1.0)));
+            assert_eq!(dm.get("b"), Some(&num(2.0)));
+        } else {
+            panic!("dst not object");
+        }
+    } else {
+        panic!("not object");
+    }
+
+    let code = "for (v of $.src) $.out.push(v)";
+    let (r, _) = run(
+        code,
+        obj(vec![("src", arr(vec![num(10.0), num(20.0)])), ("out", arr(vec![]))]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        let out = m.get("out").unwrap();
+        if let Value::Array(a) = out {
+            assert_eq!(a.borrow().len(), 2);
+        } else {
+            panic!("out not array");
+        }
+    } else {
+        panic!("not object");
+    }
+
+    let code = "for (i = 0; i < 3; i += 1) $.a[i] = i";
+    let (r, _) = run(code, obj(vec![("a", arr(vec![]))]));
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        let a = m.get("a").unwrap();
+        if let Value::Array(x) = a {
+            let b = x.borrow();
+            assert_eq!(b.len(), 3);
+            assert_eq!(b[0], num(0.0));
+            assert_eq!(b[1], num(1.0));
+            assert_eq!(b[2], num(2.0));
+        } else {
+            panic!("a not array");
+        }
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_if_wrapping_braced_for() {
+    let code = "if ($.ok) for (v of $.src) $.out.push(v)\n$.done = 1";
+    let (r, _) = run(
+        code,
+        obj(vec![
+            ("ok", Value::Bool(true)),
+            ("src", arr(vec![num(1.0), num(2.0)])),
+            ("out", arr(vec![])),
+        ]),
+    );
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        let out = m.get("out").unwrap();
+        if let Value::Array(a) = out {
+            assert_eq!(a.borrow().len(), 2);
+        } else {
+            panic!("out not array");
+        }
+        assert_eq!(m.get("done"), Some(&num(1.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_for_break_continue() {
+    let code = "for (i = 0; i < 5; i += 1) if (i == 2) continue; else if (i == 4) break; else $.a.push(i)";
+    let (r, _) = run(code, obj(vec![("a", arr(vec![]))]));
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        let a = m.get("a").unwrap();
+        if let Value::Array(x) = a {
+            let b = x.borrow();
+            assert_eq!(b.len(), 3);
+            assert_eq!(b[0], num(0.0));
+            assert_eq!(b[1], num(1.0));
+            assert_eq!(b[2], num(3.0));
+        } else {
+            panic!("a not array");
+        }
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_semicolon_ends_body() {
+    let (r, _) = run("if ($.x > 0) $.a = 1; $.b = 2;", obj(vec![("x", num(0.0))]));
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert!(m.get("a").is_none());
+        assert_eq!(m.get("b"), Some(&num(2.0)));
+    } else {
+        panic!("not object");
+    }
+}
+
+#[test]
+fn brace_less_missing_body_errors() {
+    let e = execute("if (true)", obj(vec![]), 100);
+    assert!(e.is_err(), "should error on missing body");
+}
+
+#[test]
+fn brace_less_empty_body_semicolon() {
+    let (r, _) = run("if ($.x > 0); $.a = 1;", obj(vec![("x", num(1.0))]));
+    if let Value::Object(o) = &r {
+        let m = o.borrow();
+        assert_eq!(m.get("a"), Some(&num(1.0)));
+    } else {
+        panic!("not object");
+    }
+
+    let (_, last) = run("for (i = 0; i < 3; i += 1);", obj(vec![]));
+    assert_eq!(last, Some(num(3.0)));
 }
 
 #[test]
