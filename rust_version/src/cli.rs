@@ -500,139 +500,62 @@ fn print_language_help<W: Write>(w: &mut W) -> Result<(), String> {
         w,
         "jsonsh {} scripting language reference\n\
 \n\
-Values and literals:\n\
-  null, boolean, number, string, array, object, function\n\
-  null  true  false  12.5  \"text\"  'text'  [1, 2]  {{name: \"Tom\"}}\n\
-  Strings support common escapes and \\uXXXX. Arrays and objects allow trailing commas.\n\
+jsonsh evaluates a small JavaScript-like language over a JSONC value bound to\n\
+the global variable $, then writes $ back as JSON. Behaviour matches\n\
+JavaScript except for the differences below.\n\
 \n\
-Variables:\n\
-  $                       Current JSON root value\n\
-  $ = value               Replace the entire root value\n\
-  name = value            Create or update a global variable\n\
-  object.name             Access an object property\n\
-  value[key]              Object property or array element; negative indexes\n\
-                          count from the end, and assigning beyond length\n\
-                          grows the array with null holes\n\
+Differences from JavaScript\n\
+  one number type: float64 (no bigint, no Symbol)\n\
+  no undefined: missing args, missing object props, unassigned vars all yield null\n\
+  no implicit coercion, except a + b stringifies both sides when one is a string\n\
+  == and != are strict (=== and !== semantics)\n\
+  division and modulo by zero are errors, not Infinity / NaN\n\
+  && and || return booleans, not an operand\n\
+  typeof an array is \"array\" (typeof null is \"object\")\n\
+  strings index and measure by Unicode code point, not UTF-16 code unit\n\
+  no var/let/const/function/class/this/prototypes, and no block scope\n\
+  only arrow functions: (a, b) => expr, x => expr, (a, b) => {{ ... return ... }}\n\
+  only bare names and obj.method() are callable (no IIFE, no f()())\n\
+  constructors return plain values, not boxed objects (new String(\"x\") is \"string\")\n\
+  Date is UTC-only (no local timezone); no exceptions, errors carry a position\n\
 \n\
-Functions:\n\
-  (a, b) => expression    Arrow function returning the expression\n\
-  (a, b) => {{ ... }}       Arrow function with a block body; use return\n\
-  x => expression         Single parameter needs no parentheses\n\
-  () => expression        Zero parameters\n\
-  return [value]          Return from a function; return; gives null\n\
-  Functions are lexical closures. Missing arguments are null; extra arguments\n\
-  are ignored. A function stringifies as [Function], is truthy, and marshals\n\
-  to null. log/env/keys are globals and may be reassigned.\n\
+Operators (JS precedence, highest to lowest)\n\
+  ++ --    ! - ~ typeof      * / %      + -      << >> >>>\n\
+  < <= > >=    == !=     &     ^     |     &&     ||     ?:\n\
+  = += -= *= /= %=\n\
+  Optional chaining ?. short-circuits to null when a receiver is null.\n\
 \n\
-Statements:\n\
-  expression;\n\
-  {{ statements }}\n\
-  if (condition) {{ ... }} else if (condition) {{ ... }} else {{ ... }}\n\
-  for (key in object) {{ ... }}\n\
-  for (index in array) {{ ... }}\n\
-  for (value of array) {{ ... }}\n\
-  for (character of string) {{ ... }}\n\
-  for (init; condition; update) {{ ... }}\n\
-  delete object.member;\n\
-  break;\n\
-  continue;\n\
+Statements\n\
+  if/else, for..in, for..of, for(;;), delete, break, continue, return.\n\
+  Bodies may be a single brace-less statement; a dangling else binds to the\n\
+  nearest if. No switch, no try/catch.\n\
 \n\
-  A control-flow body may also be a single brace-less statement, ending at\n\
-  a semicolon, line break, or else; for example: if (x > 0) log(x) else log(0).\n\
-  A dangling else binds to the nearest preceding if.\n\
+Built-ins\n\
+  log(value, ...)      print arguments, space-separated\n\
+  env(name)            environment variable, or null if unset\n\
+  keys(v)              ordered object keys or array indexes\n\
+  parseInt(s[, radix]) parseFloat(s)\n\
+  encodeURI / decodeURI / encodeURIComponent / decodeURIComponent\n\
+  Math: PI E LN2 LN10 LOG2E LOG10E SQRT2 SQRT1_2; abs floor ceil round trunc\n\
+    sign max min pow sqrt cbrt exp log log2 log10 sin cos tan asin acos atan\n\
+    atan2 hypot random\n\
+  Constructors (with or without new): Object Array String Number Boolean Date.\n\
+    Static: Object.keys/values/entries/assign, Array.isArray,\n\
+    String.fromCharCode, Number.isInteger/isNaN/isFinite, Date.now/parse/UTC\n\
+  RegExp: /pattern/flags literals and RegExp(pattern[, flags]); flags g, i, m\n\
 \n\
-  Statements are separated by semicolons or line breaks. Repeated semicolons\n\
-  and semicolons after blocks are allowed. Expressions may continue across\n\
-  lines when syntactically incomplete. In a traditional for loop, init,\n\
-  condition, and update are each optional; an omitted condition loops forever\n\
-  (subject to --max-steps). continue runs update before the next iteration;\n\
-  break exits without running update.\n\
-\n\
-Operators, from lowest to highest precedence:\n\
-  =  +=  -=  *=  /=\n\
-  ||\n\
-  &&\n\
-  ==  !=\n\
-  >  >=  <  <=\n\
-  +  -\n\
-  *  /\n\
-  !  -  typeof value\n\
-  member access and method calls\n\
-\n\
-  Assignments are right-associative. Logical operators short-circuit. The +\n\
-  operator adds numbers, or converts both operands with toString() and\n\
-  concatenates them when either operand is a string.\n\
-\n\
-Properties:\n\
-  string.length                 Number of Unicode code points\n\
-  array.length                  Number of array elements\n\
-\n\
-Built-in functions:\n\
-  log(value, ...)               Print values separated by spaces\n\
-  env(name)                     Read an environment variable, or null if unset\n\
-  keys(value)                   Ordered object keys or numeric array indexes\n\
-\n\
-Operators include the prefix expression typeof value, which returns string,\n\
-array, object, boolean, number, or function (typeof null is \"object\").\n\
-\n\
-String methods:\n\
-  toString()\n\
-  toLowerCase()\n\
-  toUpperCase()\n\
-  substring(start[, end])\n\
-  indexOf(text[, start])\n\
-  lastIndexOf(text[, start])\n\
-  localeCompare(text)\n\
-  padStart(targetLength[, padString])\n\
-  padEnd(targetLength[, padString])\n\
-  trim()\n\
-  split(pattern[, limit])\n\
-  match(pattern)\n\
-  matchAll(pattern)\n\
-  replace(pattern, replacement)\n\
-  replaceAll(pattern, replacement)\n\
-\n\
-Regular expressions:\n\
-  /pattern/flags             ES5 regex literal; flags are g, i, m\n\
-  RegExp(pattern, flags?)    Construct a regex from a string\n\
-  re.test(str)               Return true if re matches str\n\
-  re.exec(str)               Return a match object or null\n\
-  re.source, re.flags        Read-only regex properties\n\
-  re.global, re.ignoreCase, re.multiline\n\
-\n\
-  match() returns the full match and capture groups, or null; with the g flag\n\
-  it returns an array of full-match strings. matchAll() requires a regex with\n\
-  the g flag. replace()/replaceAll() accept a string pattern (converted to a\n\
-  regex) or a regex; replacement strings use $$ $& $' $` $n. split() treats a\n\
-  string pattern as a literal separator and a regex pattern as a regex (with\n\
-  captured groups inserted into the result).\n\
-\n\
-  Note: regex matching uses UTF-16 code-unit semantics. Rust strings cannot\n\
-  represent lone surrogates, so match boundaries that would split a surrogate\n\
-  pair are rounded to the nearest valid UTF-8 character boundary.\n\
-\n\
-Array methods:\n\
-  toString()\n\
-  push(value, ...)\n\
-  reverse()\n\
-  splice(start[, deleteCount, ...items])\n\
-  join([separator])\n\
-  indexOf(value[, start])\n\
-  lastIndexOf(value[, start])\n\
-\n\
-  Array searches use recursive deep equality. Array and object variables retain\n\
-  reference identity. for..of uses live array iteration, so splice, deletion,\n\
-  and push can affect later iterations.\n\
-\n\
-Type conversion:\n\
-  string, array, object, boolean, number, and null provide toString(). Objects\n\
-  are encoded as compact single-line JSON. typeof(null) returns \"object\".\n\
-\n\
-Execution limits:\n\
-  --max-steps limits evaluated statements and expressions. Reading an undefined\n\
-  variable, using an invalid member type, an incompatible type, or an invalid\n\
-  regular expression is a runtime error with a line and column position. Reading\n\
-  a missing object property returns null.\n\
+Methods (numbers are float64, strings are code-point indexed)\n\
+  String: toLowerCase toUpperCase trim charAt charCodeAt concat includes\n\
+    startsWith endsWith slice repeat substring indexOf lastIndexOf localeCompare\n\
+    padStart padEnd split match matchAll replace replaceAll\n\
+  Array: push reverse splice join concat slice includes indexOf lastIndexOf\n\
+    map filter reduce forEach find some every sort\n\
+  Number: toFixed([digits]) toString([radix]) valueOf\n\
+  Object: hasOwnProperty(key); every value has toString() and valueOf()\n\
+  Date: getTime getFullYear getMonth getDate getDay getHours getMinutes\n\
+    getSeconds getMilliseconds (plus getUTC* aliases) toISOString valueOf\n\
+  RegExp: test(str) exec(str); read-only source flags global ignoreCase\n\
+    multiline\n\
 ",
         VERSION
     )
