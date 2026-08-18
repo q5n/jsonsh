@@ -930,13 +930,7 @@ impl<'a> Runtime<'a> {
                         d as usize
                     }
                 };
-                if n.is_nan() {
-                    return Ok(Value::String("NaN".to_string()));
-                }
-                if n.is_infinite() {
-                    return Ok(Value::String(if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string()));
-                }
-                Ok(Value::String(format!("{:.*}", digits, n)))
+                Ok(Value::String(super::stdlib::number_to_fixed(n, digits)))
             }
             _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
         }

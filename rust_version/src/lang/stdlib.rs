@@ -57,7 +57,7 @@ pub fn math_object() -> Value {
         ("atan".to_string(), f("Math.atan", f64::atan)),
         ("pow".to_string(), b("Math.pow", f64::powf)),
         ("atan2".to_string(), b("Math.atan2", f64::atan2)),
-        ("hypot".to_string(), b("Math.hypot", f64::hypot)),
+        ("hypot".to_string(), Value::native(math_hypot)),
         ("max".to_string(), Value::native(math_max)),
         ("min".to_string(), Value::native(math_min)),
         ("random".to_string(), Value::native(math_random)),
@@ -86,6 +86,15 @@ fn math_round(n: f64) -> f64 {
         return n;
     }
     (n + 0.5).floor()
+}
+
+fn math_hypot(args: &[Value]) -> Result<Value, String> {
+    let mut sum = 0.0f64;
+    for a in args {
+        let n = to_number(Some(a));
+        sum += n * n;
+    }
+    Ok(Value::Number(sum.sqrt()))
 }
 
 fn math_sign(n: f64) -> f64 {
@@ -591,6 +600,36 @@ pub fn number_to_string(n: f64) -> String {
         return if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
     }
     format!("{}", n)
+}
+
+/// ECMAScript `Number.prototype.toFixed`: fixed-point notation with the given
+/// number of fractional digits, rounding half toward positive infinity. Uses
+/// exponential notation for magnitudes >= 1e21 (like `toString`).
+pub fn number_to_fixed(n: f64, digits: usize) -> String {
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
+    }
+    if n.abs() >= 1e21 {
+        return exponential(n);
+    }
+    let factor = 10f64.powi(digits as i32);
+    let rounded = (n * factor + 0.5).floor();
+    let val = rounded / factor;
+    format!("{:.*}", digits, val)
+}
+
+fn exponential(n: f64) -> String {
+    let s = format!("{:e}", n);
+    let (mantissa, exp) = s.split_once('e').unwrap();
+    let e: i32 = exp.parse().unwrap();
+    if e >= 0 {
+        format!("{}e+{}", mantissa, e)
+    } else {
+        format!("{}e{}", mantissa, e)
+    }
 }
 
 pub fn to_str(v: &Value) -> String {
