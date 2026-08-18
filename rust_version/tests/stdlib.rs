@@ -1,0 +1,570 @@
+use jsonsh::lang;
+use jsonsh::value::Value;
+
+fn obj(entries: Vec<(&str, Value)>) -> Value {
+    Value::object_with(entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+}
+
+fn arr(items: Vec<Value>) -> Value {
+    Value::array(items)
+}
+
+fn s(x: &str) -> Value {
+    Value::String(x.to_string())
+}
+
+fn num(n: f64) -> Value {
+    Value::Number(n)
+}
+
+fn run(code: &str, root: Value) -> (Value, Option<Value>) {
+    lang::execute(code, root, 10000).unwrap()
+}
+
+#[test]
+fn global_parse_int() {
+    let (r, _) = run(
+        r#"
+        $.dec = parseInt("42");
+        $.hex = parseInt("0x1A");
+        $.bin = parseInt("101", 2);
+        $.ws = parseInt("   7abc");
+        $.neg = parseInt("-8");
+        $.nan = parseInt("x") != parseInt("x");
+        if (parseInt("x")) { $.falsy = 1; } else { $.falsy = 2; }
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("dec", num(42.0)),
+        ("hex", num(26.0)),
+        ("bin", num(5.0)),
+        ("ws", num(7.0)),
+        ("neg", num(-8.0)),
+        ("nan", Value::Bool(true)),
+        ("falsy", num(2.0)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn global_parse_float() {
+    let (r, _) = run(
+        r#"
+        $.a = parseFloat("3.25abc");
+        $.b = parseFloat("  2.5e2x");
+        $.c = parseFloat("-0.5");
+        $.nan = parseFloat("xyz") != parseFloat("xyz");
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("a", num(3.25)),
+        ("b", num(250.0)),
+        ("c", num(-0.5)),
+        ("nan", Value::Bool(true)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn global_uri_encoding() {
+    let (r, _) = run(
+        r#"
+        $.c1 = encodeURIComponent("a b&c");
+        $.c2 = encodeURIComponent(":/?#[]@!$&'()*+,;=");
+        $.u1 = encodeURI("a b&c");
+        $.u2 = encodeURI("a/b c");
+        $.d1 = decodeURIComponent("a%20b%26c");
+        $.d2 = decodeURI("a%20b&c");
+        $.d3 = decodeURIComponent("%E4%B8%AD");
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("c1", s("a%20b%26c")),
+        (
+            "c2",
+            s("%3A%2F%3F%23%5B%5D%40!%24%26'()*%2B%2C%3B%3D"),
+        ),
+        ("u1", s("a%20b&c")),
+        ("u2", s("a/b%20c")),
+        ("d1", s("a b&c")),
+        ("d2", s("a b&c")),
+        ("d3", s("中")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn static_object_methods() {
+    let (r, _) = run(
+        r#"
+        $.keys = Object.keys({b: 1, a: 2});
+        $.values = Object.values({b: 1, a: 2});
+        $.entries = Object.entries({b: 1, a: 2});
+        $.assigned = Object.assign({a: 1}, {b: 2});
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("keys", arr(vec![s("a"), s("b")])),
+        ("values", arr(vec![num(2.0), num(1.0)])),
+        (
+            "entries",
+            arr(vec![
+                arr(vec![s("a"), num(2.0)]),
+                arr(vec![s("b"), num(1.0)]),
+            ]),
+        ),
+        ("assigned", obj(vec![("a", num(1.0)), ("b", num(2.0))])),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn static_other_methods() {
+    let (r, _) = run(
+        r#"
+        $.isArr1 = Array.isArray([1]);
+        $.isArr2 = Array.isArray({});
+        $.chr = String.fromCharCode(72, 105);
+        $.int1 = Number.isInteger(3);
+        $.int2 = Number.isInteger(3.5);
+        $.nan1 = Number.isNaN(parseInt("x"));
+        $.nan2 = Number.isNaN(3);
+        $.fin1 = Number.isFinite(3);
+        $.fin2 = Number.isFinite(parseFloat("Infinity"));
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("isArr1", Value::Bool(true)),
+        ("isArr2", Value::Bool(false)),
+        ("chr", s("Hi")),
+        ("int1", Value::Bool(true)),
+        ("int2", Value::Bool(false)),
+        ("nan1", Value::Bool(true)),
+        ("nan2", Value::Bool(false)),
+        ("fin1", Value::Bool(true)),
+        ("fin2", Value::Bool(false)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn number_instance_methods() {
+    let (r, _) = run(
+        r#"
+        $.fixed = (2.567).toFixed(2);
+        $.hex = (255).toString(16);
+        $.bin = (3).toString(2);
+        $.plain = (3).toString();
+        $.val = (5).valueOf();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("fixed", s("2.57")),
+        ("hex", s("ff")),
+        ("bin", s("11")),
+        ("plain", s("3")),
+        ("val", num(5.0)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn string_instance_methods() {
+    let (r, _) = run(
+        r#"
+        $.at = "hello".charAt(1);
+        $.code = "hello".charCodeAt(1);
+        $.cat = "foo".concat("bar", "baz");
+        $.inc1 = "hello world".includes("world");
+        $.inc2 = "hello world".includes("xyz");
+        $.start = "hello".startsWith("he");
+        $.end = "hello".endsWith("lo");
+        $.slice = "hello".slice(1, 3);
+        $.sliceNeg = "hello".slice(-3);
+        $.rep = "ab".repeat(3);
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("at", s("e")),
+        ("code", num(101.0)),
+        ("cat", s("foobarbaz")),
+        ("inc1", Value::Bool(true)),
+        ("inc2", Value::Bool(false)),
+        ("start", Value::Bool(true)),
+        ("end", Value::Bool(true)),
+        ("slice", s("el")),
+        ("sliceNeg", s("llo")),
+        ("rep", s("ababab")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn array_instance_methods() {
+    let (r, _) = run(
+        r#"
+        $.concat = [1, 2].concat([3], 4);
+        $.slice = [1, 2, 3, 4].slice(1, 3);
+        $.inc1 = [1, 2, 3].includes(2);
+        $.inc2 = [1, 2, 3].includes(5);
+        $.mapped = [1, 2, 3].map(x => x * 2);
+        $.filtered = [1, 2, 3, 4].filter(x => x > 2);
+        $.reduced = [1, 2, 3].reduce((a, b) => a + b, 0);
+        $.found = [1, 2, 3].find(x => x > 1);
+        $.some = [1, 2, 3].some(x => x > 2);
+        $.every = [1, 2, 3].every(x => x > 0);
+        $.sorted = [3, 1, 2].sort();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("concat", arr(vec![num(1.0), num(2.0), num(3.0), num(4.0)])),
+        ("slice", arr(vec![num(2.0), num(3.0)])),
+        ("inc1", Value::Bool(true)),
+        ("inc2", Value::Bool(false)),
+        ("mapped", arr(vec![num(2.0), num(4.0), num(6.0)])),
+        ("filtered", arr(vec![num(3.0), num(4.0)])),
+        ("reduced", num(6.0)),
+        ("found", num(2.0)),
+        ("some", Value::Bool(true)),
+        ("every", Value::Bool(true)),
+        ("sorted", arr(vec![num(1.0), num(2.0), num(3.0)])),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn object_and_boolean_instance_methods() {
+    let (r, _) = run(
+        r#"
+        $.o = {a: 1};
+        $.has1 = $.o.hasOwnProperty("a");
+        $.has2 = $.o.hasOwnProperty("b");
+        $.b = true.valueOf();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("o", obj(vec![("a", num(1.0))])),
+        ("has1", Value::Bool(true)),
+        ("has2", Value::Bool(false)),
+        ("b", Value::Bool(true)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn date_constructor_and_methods() {
+    let (r, _) = run(
+        r#"
+        $.ms = new Date(0).getTime();
+        $.iso = new Date(0).toISOString();
+        $.year = new Date(0).getFullYear();
+        $.month = new Date(0).getMonth();
+        $.date = new Date(0).getDate();
+        $.day = new Date(0).getDay();
+        $.hours = new Date(0).getHours();
+        $.parsed = Date.parse("1970-01-01T00:00:00.000Z");
+        $.utc = Date.UTC(1970, 0, 1);
+        $.constructed = new Date(2020, 0, 2).getDate();
+        $.fromStr = new Date("2020-01-02T00:00:00.000Z").getTime();
+        $.val = new Date(0).valueOf();
+        $.nowPositive = Date.now() > 0;
+        $.nowNum = typeof Date.now();
+        $.type = typeof new Date(0);
+        $.json = {d: new Date(0)}.toString();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("ms", num(0.0)),
+        ("iso", s("1970-01-01T00:00:00.000Z")),
+        ("year", num(1970.0)),
+        ("month", num(0.0)),
+        ("date", num(1.0)),
+        ("day", num(4.0)),
+        ("hours", num(0.0)),
+        ("parsed", num(0.0)),
+        ("utc", num(0.0)),
+        ("constructed", num(2.0)),
+        ("fromStr", num(1577923200000.0)),
+        ("val", num(0.0)),
+        ("nowPositive", Value::Bool(true)),
+        ("nowNum", s("number")),
+        ("type", s("object")),
+        ("json", s("{\"d\":\"1970-01-01T00:00:00.000Z\"}")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn math_static_methods() {
+    let (r, _) = run(
+        r#"
+        $.pi = Math.PI;
+        $.e = Math.E;
+        $.abs = Math.abs(-3.5);
+        $.floor = Math.floor(3.7);
+        $.ceil = Math.ceil(3.2);
+        $.round1 = Math.round(3.5);
+        $.round2 = Math.round(-2.5);
+        $.trunc = Math.trunc(3.9);
+        $.sign = Math.sign(-7);
+        $.max = Math.max(1, 5, 3);
+        $.min = Math.min(1, 5, 3);
+        $.pow = Math.pow(2, 10);
+        $.sqrt = Math.sqrt(16);
+        $.cbrt = Math.cbrt(27);
+        $.exp = Math.exp(0);
+        $.log = Math.log(Math.E);
+        $.log2 = Math.log2(8);
+        $.log10 = Math.log10(1000);
+        $.sin = Math.sin(0);
+        $.cos = Math.cos(0);
+        $.atan2 = Math.atan2(1, 1);
+        $.hypot = Math.hypot(3, 4);
+        $.randNum = typeof Math.random();
+        $.randInRange = Math.random() >= 0 && Math.random() < 1;
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("pi", num(std::f64::consts::PI)),
+        ("e", num(std::f64::consts::E)),
+        ("abs", num(3.5)),
+        ("floor", num(3.0)),
+        ("ceil", num(4.0)),
+        ("round1", num(4.0)),
+        ("round2", num(-2.0)),
+        ("trunc", num(3.0)),
+        ("sign", num(-1.0)),
+        ("max", num(5.0)),
+        ("min", num(1.0)),
+        ("pow", num(1024.0)),
+        ("sqrt", num(4.0)),
+        ("cbrt", num(3.0)),
+        ("exp", num(1.0)),
+        ("log", num(1.0)),
+        ("log2", num(3.0)),
+        ("log10", num(3.0)),
+        ("sin", num(0.0)),
+        ("cos", num(1.0)),
+        ("atan2", num(std::f64::consts::FRAC_PI_4)),
+        ("hypot", num(5.0)),
+        ("randNum", s("number")),
+        ("randInRange", Value::Bool(true)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn nan_infinity_serialization() {
+    let (r, _) = run(
+        r#"
+        $.concatNan = "x" + parseInt("y");
+        $.concatInf = "x" + parseFloat("Infinity");
+        $.concatNegInf = "x" + parseFloat("-Infinity");
+        $.json = {a: parseInt("z"), b: 1}.toString();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("concatNan", s("xNaN")),
+        ("concatInf", s("xInfinity")),
+        ("concatNegInf", s("x-Infinity")),
+        ("json", s("{\"a\":null,\"b\":1}")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn increment_decrement() {
+    let (r, _) = run(
+        r#"
+        x = 5;
+        $.post = x++;
+        $.after = x;
+        y = 5;
+        $.pre = ++y;
+        z = 5;
+        $.postDec = z--;
+        w = 5;
+        $.preDec = --w;
+        $.arr = [10, 20];
+        $.v0 = $.arr[0]++;
+        $.arr0 = $.arr[0];
+        $.o = {n: 7};
+        $.o1 = $.o.n--;
+        $.o2 = $.o.n;
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("post", num(5.0)),
+        ("after", num(6.0)),
+        ("pre", num(6.0)),
+        ("postDec", num(5.0)),
+        ("preDec", num(4.0)),
+        ("arr", arr(vec![num(11.0), num(20.0)])),
+        ("v0", num(10.0)),
+        ("arr0", num(11.0)),
+        ("o", obj(vec![("n", num(6.0))])),
+        ("o1", num(7.0)),
+        ("o2", num(6.0)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn bitwise_and_modulo() {
+    let (r, _) = run(
+        r#"
+        $.and = 12 & 10;
+        $.or = 12 | 10;
+        $.xor = 12 ^ 10;
+        $.not = ~5;
+        $.shl = 1 << 3;
+        $.shr = -8 >> 2;
+        $.ushr = -8 >>> 29;
+        $.mod = 7 % 3;
+        $.modNeg = -7 % 3;
+        $.prec1 = 10 + 3 % 4;
+        $.prec2 = 1 << 2 + 1;
+        m = 7;
+        m %= 4;
+        $.modAssign = m;
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("and", num(8.0)),
+        ("or", num(14.0)),
+        ("xor", num(6.0)),
+        ("not", num(-6.0)),
+        ("shl", num(8.0)),
+        ("shr", num(-2.0)),
+        ("ushr", num(7.0)),
+        ("mod", num(1.0)),
+        ("modNeg", num(-1.0)),
+        ("prec1", num(13.0)),
+        ("prec2", num(8.0)),
+        ("modAssign", num(3.0)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn ternary_conditional() {
+    let (r, _) = run(
+        r#"
+        $.t1 = 1 ? "yes" : "no";
+        $.t2 = 0 ? "yes" : "no";
+        $.t3 = null ? "a" : "b";
+        $.t4 = "" ? 1 : 2;
+        $.nested = 1 ? (0 ? 1 : 2) : 3;
+        $.rightAssoc = 0 ? 1 : 0 ? 2 : 3;
+        a = 1;
+        x = a ? 10 : 20;
+        $.condAssign = x;
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("t1", s("yes")),
+        ("t2", s("no")),
+        ("t3", s("b")),
+        ("t4", num(2.0)),
+        ("nested", num(2.0)),
+        ("rightAssoc", num(3.0)),
+        ("condAssign", num(10.0)),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn optional_chaining() {
+    let (r, _) = run(
+        r#"
+        $.a = {b: {c: 42}};
+        $.v1 = $.a?.b?.c;
+        $.v2 = $.a?.missing?.c;
+        $.v3 = $.missing?.c;
+        $.v4 = $.a?.b;
+        $.arr = [10, 20];
+        $.v5 = $.arr?.[1];
+        $.o = {f: x => x * 2};
+        $.v6 = $.o?.f(21);
+        $.v7 = $.missing?.f(1);
+        $.v8 = $.a?.b.c;
+    "#,
+        obj(vec![]),
+    );
+    // The stored arrow function in `o` cannot be compared structurally, so
+    // assert the numeric/object members directly.
+    let o = match &r {
+        Value::Object(o) => o.borrow(),
+        _ => panic!("root must be object"),
+    };
+    assert_eq!(o.get("v1"), Some(&num(42.0)));
+    assert_eq!(o.get("v2"), Some(&Value::Null));
+    assert_eq!(o.get("v3"), Some(&Value::Null));
+    assert_eq!(o.get("v4"), Some(&obj(vec![("c", num(42.0))])));
+    assert_eq!(o.get("v5"), Some(&num(20.0)));
+    assert_eq!(o.get("v6"), Some(&num(42.0)));
+    assert_eq!(o.get("v7"), Some(&Value::Null));
+    assert_eq!(o.get("v8"), Some(&num(42.0)));
+    assert!(matches!(o.get("o"), Some(Value::Object(_))));
+}
+
+#[test]
+fn new_operator_and_constructors() {
+    let (r, _) = run(
+        r#"
+        $.a = new Array(1, 2, 3);
+        $.b = Array();
+        $.s = new String(42);
+        $.n = Number("3.5");
+        $.b2 = Boolean(0);
+        $.b3 = Boolean("x");
+        $.o = Object();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("a", arr(vec![num(1.0), num(2.0), num(3.0)])),
+        ("b", arr(vec![])),
+        ("s", s("42")),
+        ("n", num(3.5)),
+        ("b2", Value::Bool(false)),
+        ("b3", Value::Bool(true)),
+        ("o", obj(vec![])),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn for_loop_increment_and_shift_masking() {
+    let (r, _) = run(
+        r#"
+        sum = 0;
+        for (i = 0; i < 4; i++) { sum = sum + i; }
+        $.loopSum = sum;
+        $.shlWrap = 1 << 32;
+        $.shlWrap2 = 1 << 34;
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("loopSum", num(6.0)),
+        ("shlWrap", num(1.0)),
+        ("shlWrap2", num(4.0)),
+    ]);
+    assert_eq!(r, want);
+}

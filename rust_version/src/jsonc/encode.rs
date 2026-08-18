@@ -16,9 +16,10 @@ fn append_json(dst: &mut String, v: &Value) -> Result<(), String> {
         Value::String(s) => append_json_string(dst, s),
         Value::Number(n) => {
             if n.is_nan() || n.is_infinite() {
-                return Err(format!("json: unsupported value: {}", n));
+                dst.push_str("null");
+            } else {
+                dst.push_str(&format_float(*n));
             }
-            dst.push_str(&format_float(*n));
         }
         Value::Array(a) => {
             dst.push('[');
@@ -42,7 +43,16 @@ fn append_json(dst: &mut String, v: &Value) -> Result<(), String> {
             }
             dst.push('}');
         }
-        Value::Function(_) | Value::Builtin(_) | Value::Regex(_) => dst.push_str("null"),
+        Value::Function(_) | Value::Builtin(_) | Value::Constructor(_) | Value::Regex(_) => {
+            dst.push_str("null")
+        }
+        Value::Date(ms) => {
+            if ms.is_nan() {
+                dst.push_str("null");
+            } else {
+                append_json_string(dst, &crate::date::to_iso_string(*ms));
+            }
+        }
     }
     Ok(())
 }

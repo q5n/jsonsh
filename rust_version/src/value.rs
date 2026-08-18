@@ -32,6 +32,16 @@ pub enum Builtin {
     RegExp,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Constructor {
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Date,
+}
+
 #[derive(Clone)]
 pub enum Function {
     Closure(Rc<ClosureData>),
@@ -57,7 +67,9 @@ pub enum Value {
     Object(Rc<RefCell<BTreeMap<String, Value>>>),
     Function(Rc<Function>),
     Builtin(Builtin),
+    Constructor(Constructor),
     Regex(Rc<Regex>),
+    Date(f64),
 }
 
 impl PartialEq for Value {
@@ -73,10 +85,12 @@ impl PartialEq for Value {
             }
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
             (Value::Builtin(a), Value::Builtin(b)) => a == b,
+            (Value::Constructor(a), Value::Constructor(b)) => a == b,
             (Value::Regex(a), Value::Regex(b)) => {
                 Rc::ptr_eq(a, b)
                     || (a.source() == b.source() && a.flags() == b.flags())
             }
+            (Value::Date(a), Value::Date(b)) => a == b,
             _ => false,
         }
     }
@@ -111,8 +125,16 @@ impl Value {
         Value::Builtin(b)
     }
 
+    pub fn constructor(c: Constructor) -> Value {
+        Value::Constructor(c)
+    }
+
     pub fn regex(re: Regex) -> Value {
         Value::Regex(Rc::new(re))
+    }
+
+    pub fn date(ms: f64) -> Value {
+        Value::Date(ms)
     }
 
     /// Deep copy: allocates fresh aggregate containers so that mutating the
@@ -134,7 +156,9 @@ impl Value {
             ),
             Value::Function(f) => Value::Function(f.clone()),
             Value::Builtin(b) => Value::Builtin(*b),
+            Value::Constructor(c) => Value::Constructor(*c),
             Value::Regex(r) => Value::Regex(r.clone()),
+            Value::Date(ms) => Value::Date(*ms),
         }
     }
 }

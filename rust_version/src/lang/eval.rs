@@ -7,7 +7,7 @@ use std::rc::Rc;
 use crate::jsonc;
 use crate::value::{Builtin, Function, Value};
 
-use super::ast::{ArrowBody, Expr, Program, Stmt};
+use super::ast::{ArrowBody, ChainStep, Expr, Program, Stmt};
 use super::parser;
 use super::token::{Error, Pos, Tok};
 
@@ -89,6 +89,19 @@ impl<'a> Runtime<'a> {
             .vars
             .borrow_mut()
             .insert("RegExp".to_string(), Value::builtin(Builtin::RegExp));
+        for (name, c) in super::stdlib::constructors() {
+            root_env
+                .vars
+                .borrow_mut()
+                .insert(name.to_string(), Value::constructor(c));
+        }
+        for (name, f) in super::stdlib::global_functions() {
+            root_env.vars.borrow_mut().insert(name.to_string(), f);
+        }
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("Math".to_string(), super::stdlib::math_object());
         Runtime {
             scope: root_env.clone(),
             root: root_env,
@@ -330,13 +343,16 @@ impl<'a> Runtime<'a> {
                     return Ok(Value::String(type_of(&v).to_string()));
                 }
                 let v = self.eval(x)?;
-                if *op == Tok::Bang {
-                    Ok(Value::Bool(!truth(&v)))
-                } else {
-                    match v {
+                match op {
+                    Tok::Bang => Ok(Value::Bool(!truth(&v))),
+                    Tok::BitNot => match v {
+                        Value::Number(n) => Ok(Value::Number(!to_int32(n) as f64)),
+                        _ => Err(self.fail(*p, "unary '~' requires number")),
+                    },
+                    _ => match v {
                         Value::Number(n) => Ok(Value::Number(-n)),
                         _ => Err(self.fail(*p, "unary '-' requires number")),
-                    }
+                    },
                 }
             }
             Expr::Binary(p, op, l, r) => {
@@ -365,7 +381,64 @@ impl<'a> Runtime<'a> {
                 self.member_value(*p, &obj_v, &key_v)
             }
             Expr::Call(p, name, args) => self.call(*p, name, args),
+            Expr::New(p, name, args) => {
+                let mut values = Vec::with_capacity(args.len());
+                for e in args {
+                    values.push(self.eval(e)?);
+                }
+                let f = self
+                    .get_var(name)
+                    .ok_or_else(|| self.fail(*p, &format!("unknown function {:?}", name)))?;
+                if let Value::Constructor(c) = &f {
+                    super::stdlib::construct(*c, &values)
+                        .map_err(|msg| self.fail(*p, &msg))
+                } else {
+                    Err(self.fail(*p, &format!("{:?} is not a constructor", name)))
+                }
+            }
             Expr::MethodCall(p, recv, name, args) => self.method_call(*p, recv, name, args),
+            Expr::Ternary(_p, cond, then, els) => {
+                let c = self.eval(cond)?;
+                if truth(&c) {
+                    self.eval(then)
+                } else {
+                    self.eval(els)
+                }
+            }
+            Expr::Update(p, op, target, prefix) => {
+                let r = self.reference(target)?;
+                let old = self.ref_get(&r)?;
+                let old_n = match old {
+                    Value::Number(n) => n,
+                    _ => return Err(self.fail(*p, "increment/decrement requires a number")),
+                };
+                let delta = if *op == Tok::Inc { 1.0 } else { -1.0 };
+                let new_n = old_n + delta;
+                self.ref_set(&r, Value::Number(new_n))?;
+                Ok(Value::Number(if *prefix { new_n } else { old_n }))
+            }
+            Expr::Optional(p, base, steps) => {
+                let mut v = self.eval(base)?;
+                if matches!(v, Value::Null) {
+                    return Ok(Value::Null);
+                }
+                for step in steps {
+                    match step {
+                        ChainStep::Prop(key) => {
+                            let k = self.eval(key)?;
+                            v = self.member_value(*p, &v, &k)?;
+                        }
+                        ChainStep::Method(name, args) => {
+                            let mut vals = Vec::with_capacity(args.len());
+                            for a in args {
+                                vals.push(self.eval(a)?);
+                            }
+                            v = self.invoke_method(*p, v, name, vals)?;
+                        }
+                    }
+                }
+                Ok(v)
+            }
             Expr::Arrow(_, params, body) => {
                 let body: Rc<dyn Any> = Rc::new((**body).clone());
                 let env: Rc<dyn Any> = self.scope.clone();
@@ -422,6 +495,16 @@ impl<'a> Runtime<'a> {
                     _ => Err(self.fail(p, &format!("regex property {:?} does not exist", k))),
                 }
             }
+            Value::Constructor(c) => {
+                let k = match key {
+                    Value::String(k) => k,
+                    _ => return Err(self.fail(p, "constructor property key must be string")),
+                };
+                match super::stdlib::static_method(*c, k) {
+                    Some(f) => Ok(f),
+                    None => Err(self.fail(p, &format!("{:?}.{} does not exist", c, k))),
+                }
+            }
             _ => Err(self.fail(p, "member access requires array or object")),
         }
     }
@@ -448,6 +531,27 @@ impl<'a> Runtime<'a> {
                         return Err(self.fail(p, "division by zero"));
                     }
                     return Ok(Value::Number(x / y));
+                }
+                Tok::Percent => {
+                    if y == 0.0 {
+                        return Err(self.fail(p, "modulo by zero"));
+                    }
+                    return Ok(Value::Number(x % y));
+                }
+                Tok::BitAnd => return Ok(Value::Number((to_int32(x) & to_int32(y)) as f64)),
+                Tok::BitOr => return Ok(Value::Number((to_int32(x) | to_int32(y)) as f64)),
+                Tok::BitXor => return Ok(Value::Number((to_int32(x) ^ to_int32(y)) as f64)),
+                Tok::Shl => {
+                    let s = to_shift(y);
+                    return Ok(Value::Number(to_int32(x).wrapping_shl(s) as f64));
+                }
+                Tok::Shr => {
+                    let s = to_shift(y);
+                    return Ok(Value::Number((to_int32(x) >> s) as f64));
+                }
+                Tok::UShr => {
+                    let s = to_shift(y);
+                    return Ok(Value::Number((to_uint32(x) >> s) as f64));
                 }
                 Tok::GT => return Ok(Value::Bool(x > y)),
                 Tok::GE => return Ok(Value::Bool(x >= y)),
@@ -478,6 +582,7 @@ impl<'a> Runtime<'a> {
                 Tok::MinusAssign => Tok::Minus,
                 Tok::StarAssign => Tok::Star,
                 Tok::SlashAssign => Tok::Slash,
+                Tok::PercentAssign => Tok::Percent,
                 _ => Tok::Plus,
             };
             v = self.apply(p, apply_op, &old, &v)?;
@@ -596,6 +701,8 @@ impl<'a> Runtime<'a> {
     fn invoke(&mut self, p: Pos, f: &Value, values: &[Value]) -> Result<Value, Error> {
         match f {
             Value::Builtin(b) => self.run_builtin(p, *b, values),
+            Value::Constructor(c) => super::stdlib::construct(*c, values)
+                .map_err(|msg| self.fail(p, &msg)),
             Value::Function(f) => match f.as_ref() {
                 Function::Native(n) => n(values).map_err(|msg| self.fail(p, &msg)),
                 Function::Closure(c) => self.invoke_closure(p, c, values),
@@ -723,11 +830,39 @@ impl<'a> Runtime<'a> {
         for a in args {
             values.push(self.eval(a)?);
         }
+        self.invoke_method(p, recv, name, values)
+    }
+
+    fn invoke_method(
+        &mut self,
+        p: Pos,
+        recv: Value,
+        name: &str,
+        values: Vec<Value>,
+    ) -> Result<Value, Error> {
+        if let Value::Constructor(c) = &recv {
+            return match super::stdlib::static_method(*c, name) {
+                Some(f) => self.invoke(p, &f, &values),
+                None => Err(self.fail(p, &format!("{:?}.{} is not a function", c, name))),
+            };
+        }
+        if let Value::Number(n) = &recv {
+            return self.number_method(p, *n, name, &values);
+        }
+        if let Value::Date(ms) = &recv {
+            return self.date_method(p, *ms, name, &values);
+        }
         if name == "toString" {
             if !values.is_empty() {
                 return Err(self.fail(p, "toString expects no arguments"));
             }
             return Ok(Value::String(value_string(&recv)));
+        }
+        if name == "valueOf" {
+            if !values.is_empty() {
+                return Err(self.fail(p, "valueOf expects no arguments"));
+            }
+            return Ok(recv.clone());
         }
         if let Value::Object(o) = &recv {
             if let Some(member) = o.borrow().get(name) {
@@ -735,6 +870,7 @@ impl<'a> Runtime<'a> {
                     return self.invoke(p, member, &values);
                 }
             }
+            return self.object_method(p, o, name, &values);
         }
         if let Value::Array(a) = &recv {
             return self.array_method(p, a, name, &values);
@@ -749,6 +885,109 @@ impl<'a> Runtime<'a> {
             return self.string_method(p, s, name, &values);
         }
         Err(self.fail(p, &format!("unknown method {:?}", name)))
+    }
+
+    fn number_method(
+        &mut self,
+        p: Pos,
+        n: f64,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        match name {
+            "valueOf" => {
+                if !args.is_empty() {
+                    return Err(self.fail(p, "valueOf expects no arguments"));
+                }
+                Ok(Value::Number(n))
+            }
+            "toString" => {
+                if args.len() > 1 {
+                    return Err(self.fail(p, "toString expects 0 or 1 arguments"));
+                }
+                if args.len() == 1 {
+                    let radix = integer_arg(&args[0])
+                        .ok_or_else(|| self.fail(p, "toString radix must be an integer"))?;
+                    if !(2..=36).contains(&radix) {
+                        return Err(self.fail(p, "toString radix must be between 2 and 36"));
+                    }
+                    return Ok(Value::String(radix_string(n, radix)));
+                }
+                Ok(Value::String(super::stdlib::number_to_string(n)))
+            }
+            "toFixed" => {
+                if args.len() > 1 {
+                    return Err(self.fail(p, "toFixed expects 0 or 1 arguments"));
+                }
+                let digits = match args.first() {
+                    None => 0,
+                    Some(v) => {
+                        let d = integer_arg(v)
+                            .ok_or_else(|| self.fail(p, "toFixed digits must be an integer"))?;
+                        if !(0..=100).contains(&d) {
+                            return Err(self.fail(p, "toFixed digits must be between 0 and 100"));
+                        }
+                        d as usize
+                    }
+                };
+                if n.is_nan() {
+                    return Ok(Value::String("NaN".to_string()));
+                }
+                if n.is_infinite() {
+                    return Ok(Value::String(if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string()));
+                }
+                Ok(Value::String(format!("{:.*}", digits, n)))
+            }
+            _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
+        }
+    }
+
+    fn object_method(
+        &mut self,
+        p: Pos,
+        o: &Rc<RefCell<BTreeMap<String, Value>>>,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        match name {
+            "hasOwnProperty" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "hasOwnProperty expects 1 argument"));
+                }
+                let key = match &args[0] {
+                    Value::String(s) => s,
+                    _ => return Err(self.fail(p, "hasOwnProperty requires a string key")),
+                };
+                Ok(Value::Bool(o.borrow().contains_key(key)))
+            }
+            _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
+        }
+    }
+
+    fn date_method(
+        &mut self,
+        p: Pos,
+        ms: f64,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        if !args.is_empty() {
+            return Err(self.fail(p, &format!("{} expects no arguments", name)));
+        }
+        let parts = crate::date::date_parts(ms);
+        match name {
+            "valueOf" | "getTime" => Ok(Value::Number(ms)),
+            "getFullYear" | "getUTCFullYear" => Ok(Value::Number(parts.year as f64)),
+            "getMonth" | "getUTCMonth" => Ok(Value::Number((parts.month - 1) as f64)),
+            "getDate" | "getUTCDate" => Ok(Value::Number(parts.day as f64)),
+            "getDay" | "getUTCDay" => Ok(Value::Number(parts.weekday as f64)),
+            "getHours" | "getUTCHours" => Ok(Value::Number(parts.hours as f64)),
+            "getMinutes" | "getUTCMinutes" => Ok(Value::Number(parts.minutes as f64)),
+            "getSeconds" | "getUTCSeconds" => Ok(Value::Number(parts.seconds as f64)),
+            "getMilliseconds" | "getUTCMilliseconds" => Ok(Value::Number(parts.millis as f64)),
+            "toISOString" | "toString" => Ok(Value::String(crate::date::to_iso_string(ms))),
+            _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
+        }
     }
 
     fn string_method(
@@ -899,6 +1138,127 @@ impl<'a> Runtime<'a> {
                     }
                 }
                 Ok(Value::String(result.into_iter().collect()))
+            }
+            "charAt" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "charAt expects 1 argument"));
+                }
+                let i = integer_arg(&args[0])
+                    .ok_or_else(|| self.fail(p, "charAt index must be an integer"))?;
+                if i < 0 || i >= runes.len() as i64 {
+                    return Ok(Value::String(String::new()));
+                }
+                Ok(Value::String(runes[i as usize].to_string()))
+            }
+            "charCodeAt" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "charCodeAt expects 1 argument"));
+                }
+                let i = integer_arg(&args[0])
+                    .ok_or_else(|| self.fail(p, "charCodeAt index must be an integer"))?;
+                if i < 0 || i >= runes.len() as i64 {
+                    return Ok(Value::Number(f64::NAN));
+                }
+                Ok(Value::Number(runes[i as usize] as u32 as f64))
+            }
+            "concat" => {
+                let mut out = s.to_string();
+                for a in args {
+                    out.push_str(&value_string(a));
+                }
+                Ok(Value::String(out))
+            }
+            "includes" | "startsWith" | "endsWith" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(self.fail(p, &format!("{} expects 1 or 2 arguments", name)));
+                }
+                let needle = match &args[0] {
+                    Value::String(s) => s,
+                    _ => return Err(self.fail(p, &format!("{} requires a string argument", name))),
+                };
+                let n = runes.len() as i64;
+                let hay: String = match name {
+                    "includes" => {
+                        let from = if args.len() == 2 {
+                            clamp(
+                                integer_arg(&args[1]).ok_or_else(|| {
+                                    self.fail(p, &format!("{} position must be an integer", name))
+                                })?,
+                                0,
+                                n,
+                            )
+                        } else {
+                            0
+                        };
+                        runes[from as usize..].iter().collect()
+                    }
+                    "startsWith" => {
+                        let from = if args.len() == 2 {
+                            clamp(
+                                integer_arg(&args[1]).ok_or_else(|| {
+                                    self.fail(p, &format!("{} position must be an integer", name))
+                                })?,
+                                0,
+                                n,
+                            )
+                        } else {
+                            0
+                        };
+                        runes[from as usize..].iter().collect()
+                    }
+                    _ => {
+                        let end = if args.len() == 2 {
+                            clamp(
+                                integer_arg(&args[1]).ok_or_else(|| {
+                                    self.fail(p, &format!("{} position must be an integer", name))
+                                })?,
+                                0,
+                                n,
+                            )
+                        } else {
+                            n
+                        };
+                        runes[..end as usize].iter().collect()
+                    }
+                };
+                let found = match name {
+                    "includes" => hay.contains(needle),
+                    "startsWith" => hay.starts_with(needle),
+                    _ => hay.ends_with(needle),
+                };
+                Ok(Value::Bool(found))
+            }
+            "slice" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(self.fail(p, "slice expects 1 or 2 arguments"));
+                }
+                let start = integer_arg(&args[0])
+                    .ok_or_else(|| self.fail(p, "slice indexes must be integers"))?;
+                let end = if args.len() == 2 {
+                    integer_arg(&args[1])
+                        .ok_or_else(|| self.fail(p, "slice indexes must be integers"))?
+                } else {
+                    runes.len() as i64
+                };
+                let n = runes.len() as i64;
+                let start = normalize_slice_index(start, n);
+                let end = normalize_slice_index(end, n);
+                if start > end {
+                    return Ok(Value::String(String::new()));
+                }
+                let out: String = runes[start as usize..end as usize].iter().collect();
+                Ok(Value::String(out))
+            }
+            "repeat" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, "repeat expects 1 argument"));
+                }
+                let count = integer_arg(&args[0])
+                    .ok_or_else(|| self.fail(p, "repeat count must be an integer"))?;
+                if count < 0 {
+                    return Err(self.fail(p, "repeat count must be non-negative"));
+                }
+                Ok(Value::String(s.repeat(count as usize)))
             }
             "split" | "match" | "matchAll" | "replace" | "replaceAll" => {
                 self.regexp_string_method(p, s, name, args)
@@ -1191,6 +1551,163 @@ impl<'a> Runtime<'a> {
                     Ok(Value::Number(-1.0))
                 }
             }
+            "concat" => {
+                let mut out = array.borrow().clone();
+                for a in args {
+                    match a {
+                        Value::Array(inner) => out.extend_from_slice(&inner.borrow()),
+                        v => out.push(v.clone()),
+                    }
+                }
+                Ok(Value::array(out))
+            }
+            "slice" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(self.fail(p, "slice expects 1 or 2 arguments"));
+                }
+                let len = array.borrow().len() as i64;
+                let start = normalize_slice_index(
+                    integer_arg(&args[0])
+                        .ok_or_else(|| self.fail(p, "slice indexes must be integers"))?,
+                    len,
+                );
+                let end = if args.len() == 2 {
+                    normalize_slice_index(
+                        integer_arg(&args[1])
+                            .ok_or_else(|| self.fail(p, "slice indexes must be integers"))?,
+                        len,
+                    )
+                } else {
+                    len
+                };
+                if start >= end {
+                    return Ok(Value::array(vec![]));
+                }
+                let out = array.borrow()[start as usize..end as usize].to_vec();
+                Ok(Value::array(out))
+            }
+            "includes" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(self.fail(p, "includes expects 1 or 2 arguments"));
+                }
+                let a = array.borrow();
+                let len = a.len() as i64;
+                let mut from = if args.len() == 2 {
+                    integer_arg(&args[1])
+                        .ok_or_else(|| self.fail(p, "includes start must be an integer"))?
+                } else {
+                    0
+                };
+                if from < 0 {
+                    from = (len + from).max(0);
+                }
+                from = from.min(len);
+                let found = a[from as usize..].iter().any(|v| v == &args[0]);
+                Ok(Value::Bool(found))
+            }
+            "map" | "filter" | "forEach" | "find" | "some" | "every" => {
+                if args.len() != 1 {
+                    return Err(self.fail(p, &format!("{} expects 1 argument", name)));
+                }
+                let f = &args[0];
+                let items = array.borrow().clone();
+                let mut out: Vec<Value> = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    self.step(p)?;
+                    let v = self.invoke(p, f, &[item.clone(), Value::Number(i as f64)])?;
+                    match name {
+                        "map" => out.push(v),
+                        "filter" => {
+                            if truth(&v) {
+                                out.push(item.clone());
+                            }
+                        }
+                        "find" => {
+                            if truth(&v) {
+                                return Ok(item.clone());
+                            }
+                        }
+                        "some" => {
+                            if truth(&v) {
+                                return Ok(Value::Bool(true));
+                            }
+                        }
+                        "every" => {
+                            if !truth(&v) {
+                                return Ok(Value::Bool(false));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                match name {
+                    "map" | "filter" => Ok(Value::array(out)),
+                    "forEach" => Ok(Value::Null),
+                    "find" => Ok(Value::Null),
+                    "some" => Ok(Value::Bool(false)),
+                    "every" => Ok(Value::Bool(true)),
+                    _ => unreachable!(),
+                }
+            }
+            "reduce" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(self.fail(p, "reduce expects 1 or 2 arguments"));
+                }
+                let f = &args[0];
+                let items = array.borrow().clone();
+                let mut acc: Value;
+                let start: usize;
+                if args.len() == 2 {
+                    acc = args[1].clone();
+                    start = 0;
+                } else {
+                    if items.is_empty() {
+                        return Err(self.fail(p, "reduce of empty array with no initial value"));
+                    }
+                    acc = items[0].clone();
+                    start = 1;
+                }
+                for (i, item) in items.iter().enumerate().skip(start) {
+                    self.step(p)?;
+                    acc = self.invoke(p, f, &[acc, item.clone(), Value::Number(i as f64)])?;
+                }
+                Ok(acc)
+            }
+            "sort" => {
+                if args.len() > 1 {
+                    return Err(self.fail(p, "sort expects 0 or 1 arguments"));
+                }
+                match args.first() {
+                    None => {
+                        array.borrow_mut().sort_by_key(value_string);
+                    }
+                    Some(f) => {
+                        let mut sorted = array.borrow().clone();
+                        let mut err: Option<Error> = None;
+                        sorted.sort_by(|x, y| match self.invoke(p, f, &[x.clone(), y.clone()]) {
+                            Ok(Value::Number(n)) => {
+                                if n < 0.0 {
+                                    std::cmp::Ordering::Less
+                                } else if n > 0.0 {
+                                    std::cmp::Ordering::Greater
+                                } else {
+                                    std::cmp::Ordering::Equal
+                                }
+                            }
+                            Ok(_) => std::cmp::Ordering::Equal,
+                            Err(e) => {
+                                err = Some(e);
+                                std::cmp::Ordering::Equal
+                            }
+                        });
+                        if let Some(e) = err {
+                            return Err(e);
+                        }
+                        *array.borrow_mut() = sorted;
+                    }
+                }
+                Ok(Value::Array(array.clone()))
+            }
             _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
         }
     }
@@ -1246,8 +1763,61 @@ fn integer_arg(v: &Value) -> Option<i64> {
     }
 }
 
+/// ECMAScript ToInt32: wrap the value into a signed 32-bit integer.
+fn to_int32(n: f64) -> i32 {
+    if !n.is_finite() {
+        return 0;
+    }
+    n.rem_euclid(4_294_967_296.0) as u32 as i32
+}
+
+/// ECMAScript ToUint32: wrap the value into an unsigned 32-bit integer.
+fn to_uint32(n: f64) -> u32 {
+    if !n.is_finite() {
+        return 0;
+    }
+    n.rem_euclid(4_294_967_296.0) as u32
+}
+
+/// Shift counts are taken modulo 32 (ToUint32 & 31).
+fn to_shift(n: f64) -> u32 {
+    to_uint32(n) & 31
+}
+
 fn clamp(v: i64, low: i64, high: i64) -> i64 {
     v.max(low).min(high)
+}
+
+fn normalize_slice_index(v: i64, n: i64) -> i64 {
+    if v < 0 {
+        (n + v).max(0)
+    } else {
+        v.min(n)
+    }
+}
+
+fn radix_string(n: f64, radix: i64) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
+    }
+    let mut value = n.trunc().abs() as u64;
+    let mut digits = String::new();
+    if value == 0 {
+        digits.push('0');
+    } else {
+        while value > 0 {
+            digits.push(DIGITS[(value % radix as u64) as usize] as char);
+            value /= radix as u64;
+        }
+    }
+    if n < 0.0 {
+        digits.push('-');
+    }
+    digits.chars().rev().collect()
 }
 
 /// Go's strings.ToUpper/ToLower use Unicode *simple* (1:1) case mapping, while
@@ -1291,7 +1861,7 @@ fn truth(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
-        Value::Number(n) => *n != 0.0,
+        Value::Number(n) => !n.is_nan() && *n != 0.0,
         Value::String(s) => !s.is_empty(),
         _ => true,
     }
@@ -1301,10 +1871,10 @@ fn type_of(v: &Value) -> &'static str {
     match v {
         Value::String(_) => "string",
         Value::Array(_) => "array",
-        Value::Object(_) | Value::Null | Value::Regex(_) => "object",
+        Value::Object(_) | Value::Null | Value::Regex(_) | Value::Date(_) => "object",
         Value::Bool(_) => "boolean",
         Value::Number(_) => "number",
-        Value::Function(_) | Value::Builtin(_) => "function",
+        Value::Function(_) | Value::Builtin(_) | Value::Constructor(_) => "function",
     }
 }
 
@@ -1327,7 +1897,7 @@ fn value_string(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::String(s) => s.clone(),
         Value::Bool(b) => b.to_string(),
-        Value::Number(n) => format!("{}", n),
+        Value::Number(n) => super::stdlib::number_to_string(*n),
         Value::Array(a) => {
             let parts: Vec<String> = a
                 .borrow()
@@ -1342,8 +1912,9 @@ fn value_string(v: &Value) -> String {
                 .collect();
             parts.join(",")
         }
-        Value::Function(_) | Value::Builtin(_) => "[Function]".to_string(),
+        Value::Function(_) | Value::Builtin(_) | Value::Constructor(_) => "[Function]".to_string(),
         Value::Regex(re) => format!("/{}/{}", re.source(), re.flags()),
+        Value::Date(ms) => crate::date::to_iso_string(*ms),
         Value::Object(_) => match jsonc::marshal(v) {
             Ok(s) => s,
             Err(_) => format!("{:?}", v),

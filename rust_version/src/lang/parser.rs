@@ -1,6 +1,6 @@
 use crate::value::Value;
 
-use super::ast::{ArrowBody, Expr, Program, Stmt};
+use super::ast::{ArrowBody, ChainStep, Expr, Program, Stmt};
 use super::token::{Error, Pos, Tok, Token};
 
 struct Parser {
@@ -276,7 +276,38 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
-        self.binary(1)
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr, Error> {
+        let left = self.ternary()?;
+        let op = self.peek().clone();
+        if is_assign_op(op.kind) {
+            match &left {
+                Expr::Variable(..) | Expr::Member(..) => {}
+                _ => return Err(self.err(&op, "invalid assignment target")),
+            }
+            self.next();
+            let right = self.assignment()?;
+            return Ok(Expr::Assign(op.pos, op.kind, Box::new(left), Box::new(right)));
+        }
+        Ok(left)
+    }
+
+    fn ternary(&mut self) -> Result<Expr, Error> {
+        let cond = self.binary(2)?;
+        if self.match_kind(Tok::Question) {
+            let then = self.assignment()?;
+            self.need(Tok::Colon, "expected ':' in conditional expression")?;
+            let els = self.assignment()?;
+            return Ok(Expr::Ternary(
+                cond.pos(),
+                Box::new(cond),
+                Box::new(then),
+                Box::new(els),
+            ));
+        }
+        Ok(cond)
     }
 
     fn binary(&mut self, min: i32) -> Result<Expr, Error> {
@@ -291,17 +322,9 @@ impl Parser {
                 break;
             }
             self.next();
-            let next = if q == 1 { q } else { q + 1 };
+            let next = q + 1;
             let right = self.binary(next)?;
-            if q == 1 {
-                match left {
-                    Expr::Variable(..) | Expr::Member(..) => {}
-                    _ => return Err(self.err(&op, "invalid assignment target")),
-                }
-                left = Expr::Assign(op.pos, op.kind, Box::new(left), Box::new(right));
-            } else {
-                left = Expr::Binary(op.pos, op.kind, Box::new(left), Box::new(right));
-            }
+            left = Expr::Binary(op.pos, op.kind, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
@@ -310,16 +333,32 @@ impl Parser {
         if self.peek().kind == Tok::Bang
             || self.peek().kind == Tok::Minus
             || self.peek().kind == Tok::Typeof
+            || self.peek().kind == Tok::BitNot
         {
             let t = self.next();
             let x = self.unary()?;
             return Ok(Expr::Unary(t.pos, t.kind, Box::new(x)));
         }
+        if self.peek().kind == Tok::Inc || self.peek().kind == Tok::Dec {
+            let t = self.next();
+            let x = self.unary()?;
+            return Ok(Expr::Update(t.pos, t.kind, Box::new(x), true));
+        }
+        if self.match_kind(Tok::New) {
+            let t = self.need(Tok::Ident, "expected constructor name")?;
+            self.need(Tok::LParen, "expected '(' after constructor name")?;
+            let args = self.call_args()?;
+            return self.postfix_loop(Expr::New(t.pos, t.lit, args));
+        }
         self.postfix()
     }
 
     fn postfix(&mut self) -> Result<Expr, Error> {
-        let mut x = self.primary()?;
+        let x = self.primary()?;
+        self.postfix_loop(x)
+    }
+
+    fn postfix_loop(&mut self, mut x: Expr) -> Result<Expr, Error> {
         loop {
             if self.match_kind(Tok::Dot) {
                 let n = self.need(Tok::Ident, "expected property name")?;
@@ -354,9 +393,62 @@ impl Parser {
                 x = Expr::MethodCall(m.0, m.1, name, args);
                 continue;
             }
+            if self.match_kind(Tok::QuestionDot) {
+                x = self.parse_optional(x)?;
+                continue;
+            }
+            if self.peek().kind == Tok::Inc || self.peek().kind == Tok::Dec {
+                let t = self.next();
+                x = Expr::Update(t.pos, t.kind, Box::new(x), false);
+                continue;
+            }
             break;
         }
         Ok(x)
+    }
+
+    fn parse_optional(&mut self, base: Expr) -> Result<Expr, Error> {
+        let pos = base.pos();
+        let mut steps: Vec<ChainStep> = Vec::new();
+        loop {
+            if self.peek().kind == Tok::LBracket {
+                self.next();
+                let k = self.expression()?;
+                self.need(Tok::RBracket, "expected ']' after '?.['")?;
+                steps.push(ChainStep::Prop(k));
+            } else if self.peek().kind == Tok::Ident {
+                let n = self.next();
+                if self.match_kind(Tok::LParen) {
+                    let args = self.call_args()?;
+                    steps.push(ChainStep::Method(n.lit, args));
+                } else {
+                    steps.push(ChainStep::Prop(Expr::Literal(
+                        n.pos,
+                        Value::String(n.lit),
+                    )));
+                }
+            } else if self.peek().kind == Tok::LParen {
+                return Err(self.err(self.peek(), "optional call of a receiver is not supported"));
+            } else {
+                return Err(
+                    self.err(self.peek(), "expected property name, '[' or '(' after '?.'")
+                );
+            }
+
+            match self.peek().kind {
+                Tok::Dot => {
+                    self.next();
+                }
+                Tok::LBracket | Tok::LParen => {}
+                Tok::QuestionDot => {
+                    self.next();
+                    let inner = Expr::Optional(pos, Box::new(base), steps);
+                    return self.parse_optional(inner);
+                }
+                _ => break,
+            }
+        }
+        Ok(Expr::Optional(pos, Box::new(base), steps))
     }
 
     fn regex_literal(
@@ -575,17 +667,30 @@ impl Parser {
     }
 }
 
+fn is_assign_op(k: Tok) -> bool {
+    matches!(
+        k,
+        Tok::Assign
+            | Tok::PlusAssign
+            | Tok::MinusAssign
+            | Tok::StarAssign
+            | Tok::SlashAssign
+            | Tok::PercentAssign
+    )
+}
+
 fn prec(k: Tok) -> Option<i32> {
     match k {
-        Tok::Assign | Tok::PlusAssign | Tok::MinusAssign | Tok::StarAssign | Tok::SlashAssign => {
-            Some(1)
-        }
         Tok::Or => Some(2),
         Tok::And => Some(3),
-        Tok::Eq | Tok::Ne => Some(4),
-        Tok::GT | Tok::GE | Tok::LT | Tok::LE => Some(5),
-        Tok::Plus | Tok::Minus => Some(6),
-        Tok::Star | Tok::Slash => Some(7),
+        Tok::BitOr => Some(4),
+        Tok::BitXor => Some(5),
+        Tok::BitAnd => Some(6),
+        Tok::Eq | Tok::Ne => Some(7),
+        Tok::GT | Tok::GE | Tok::LT | Tok::LE => Some(8),
+        Tok::Shl | Tok::Shr | Tok::UShr => Some(9),
+        Tok::Plus | Tok::Minus => Some(10),
+        Tok::Star | Tok::Slash | Tok::Percent => Some(11),
         _ => None,
     }
 }

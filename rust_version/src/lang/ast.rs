@@ -20,8 +20,18 @@ pub enum Expr {
     Assign(Pos, Tok, Box<Expr>, Box<Expr>),
     Member(Pos, Box<Expr>, Box<Expr>),
     Call(Pos, String, Vec<Expr>),
+    New(Pos, String, Vec<Expr>),
     MethodCall(Pos, Box<Expr>, String, Vec<Expr>),
     Arrow(Pos, Vec<String>, Box<ArrowBody>),
+    Ternary(Pos, Box<Expr>, Box<Expr>, Box<Expr>),
+    Update(Pos, Tok, Box<Expr>, bool),
+    Optional(Pos, Box<Expr>, Vec<ChainStep>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ChainStep {
+    Prop(Expr),
+    Method(String, Vec<Expr>),
 }
 
 impl Expr {
@@ -36,8 +46,12 @@ impl Expr {
             Expr::Assign(p, _, _, _) => *p,
             Expr::Member(p, _, _) => *p,
             Expr::Call(p, _, _) => *p,
+            Expr::New(p, _, _) => *p,
             Expr::MethodCall(p, _, _, _) => *p,
             Expr::Arrow(p, _, _) => *p,
+            Expr::Ternary(p, _, _, _) => *p,
+            Expr::Update(p, _, _, _) => *p,
+            Expr::Optional(p, _, _) => *p,
         }
     }
 }

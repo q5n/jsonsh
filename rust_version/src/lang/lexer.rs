@@ -45,11 +45,25 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             out.push(t);
             continue;
         }
-        let pairs: [(&str, Tok); 11] = [
+        // three-char operator `>>>`
+        if l.off + 3 <= l.src.len() && &l.src.as_bytes()[l.off..l.off + 3] == b">>>" {
+            out.push(Token {
+                kind: Tok::UShr,
+                lit: ">>>".to_string(),
+                pos: p,
+                offset,
+            });
+            l.advance();
+            l.advance();
+            l.advance();
+            continue;
+        }
+        let pairs: [(&str, Tok); 17] = [
             ("+=", Tok::PlusAssign),
             ("-=", Tok::MinusAssign),
             ("*=", Tok::StarAssign),
             ("/=", Tok::SlashAssign),
+            ("%=", Tok::PercentAssign),
             ("==", Tok::Eq),
             ("!=", Tok::Ne),
             (">=", Tok::GE),
@@ -57,6 +71,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             ("&&", Tok::And),
             ("||", Tok::Or),
             ("=>", Tok::Arrow),
+            ("++", Tok::Inc),
+            ("--", Tok::Dec),
+            ("<<", Tok::Shl),
+            (">>", Tok::Shr),
+            ("?.", Tok::QuestionDot),
         ];
         if l.off + 2 <= l.src.len() {
             let two = &l.src.as_bytes()[l.off..l.off + 2];
@@ -72,7 +91,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
                 continue;
             }
         }
-        let single: [(char, Tok); 18] = [
+        let single: [(char, Tok); 25] = [
             ('$', Tok::Dollar),
             ('(', Tok::LParen),
             (')', Tok::RParen),
@@ -91,6 +110,13 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
             ('!', Tok::Bang),
             ('=', Tok::Assign),
             ('>', Tok::GT),
+            ('<', Tok::LT),
+            ('&', Tok::BitAnd),
+            ('|', Tok::BitOr),
+            ('^', Tok::BitXor),
+            ('~', Tok::BitNot),
+            ('%', Tok::Percent),
+            ('?', Tok::Question),
         ];
         let mut matched = None;
         for &(ch, k) in &single {
@@ -99,9 +125,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Error> {
                 break;
             }
         }
-        // '<' is not in the map (Go treats it specially below); add it here.
-        let k = matched.or_else(|| if r == '<' { Some(Tok::LT) } else { None });
-        if let Some(k) = k {
+        if let Some(k) = matched {
             out.push(Token {
                 kind: k,
                 lit: r.to_string(),
@@ -201,6 +225,7 @@ impl Lexer {
             "continue" => Some(Tok::Continue),
             "return" => Some(Tok::Return),
             "typeof" => Some(Tok::Typeof),
+            "new" => Some(Tok::New),
             _ => None,
         };
         match kw {
