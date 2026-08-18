@@ -85,10 +85,6 @@ impl<'a> Runtime<'a> {
         root_env
             .vars
             .borrow_mut()
-            .insert("keys".to_string(), Value::builtin(Builtin::Keys));
-        root_env
-            .vars
-            .borrow_mut()
             .insert("RegExp".to_string(), Value::builtin(Builtin::RegExp));
         for (name, c) in super::stdlib::constructors() {
             root_env
@@ -809,23 +805,6 @@ impl<'a> Runtime<'a> {
                     .ok()
                     .map(Value::String)
                     .unwrap_or(Value::Null))
-            }
-            Builtin::Keys => {
-                if values.len() != 1 {
-                    return Err(self.fail(p, "keys expects 1 argument"));
-                }
-                match &values[0] {
-                    Value::Array(a) => {
-                        let items =
-                            (0..a.borrow().len()).map(|i| Value::Number(i as f64)).collect();
-                        Ok(Value::array(items))
-                    }
-                    Value::Object(o) => {
-                        let items = o.borrow().keys().cloned().map(Value::String).collect();
-                        Ok(Value::array(items))
-                    }
-                    _ => Err(self.fail(p, "keys requires array or object")),
-                }
             }
             Builtin::RegExp => {
                 if values.is_empty() || values.len() > 2 {

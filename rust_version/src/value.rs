@@ -28,7 +28,6 @@ impl fmt::Debug for ClosureData {
 pub enum Builtin {
     Log,
     Env,
-    Keys,
     RegExp,
 }
 

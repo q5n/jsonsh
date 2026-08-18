@@ -256,7 +256,6 @@ fn language_help() {
         "Optional chaining ?.",
         "log(value, ...)",
         "env(name)",
-        "keys(v)",
         "parseInt(s[, radix])",
         "encodeURIComponent",
         "Math:",

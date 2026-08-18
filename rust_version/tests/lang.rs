@@ -39,7 +39,7 @@ fn literals_operators_and_builtins() {
 		$.array = [1, {name: "x"}, true, null,];
 		$.len = "中文a".length;
 		$.has = $.text.indexOf("lang") >= 0;
-		$.keys = keys({b: 1, a: 2});
+		$.keys = Object.keys({b: 1, a: 2});
 	"#,
         obj(vec![]),
     );
@@ -180,7 +180,7 @@ fn missing_object_property_returns_null() {
 #[test]
 fn deep_equality_and_dynamic_access() {
     let (r, _) = run(
-        r#"key="item"; $.same = [1,{a:true}] == [1,{a:true}]; $[key] = 3; $[key] *= 2; $.first = keys({b:1,a:2})[0];"#,
+        r#"key="item"; $.same = [1,{a:true}] == [1,{a:true}]; $[key] = 3; $[key] *= 2; $.first = Object.keys({b:1,a:2})[0];"#,
         obj(vec![]),
     );
     if let Value::Object(o) = &r {
@@ -897,8 +897,8 @@ fn for_in_skips_members_deleted_before_their_turn() {
 }
 
 #[test]
-fn keys_on_array_returns_indexes() {
-    let (r, _) = run("$.a = keys([3,1,2]);", obj(vec![]));
+fn object_keys_on_array_returns_indexes() {
+    let (r, _) = run("$.a = Object.keys([3,1,2]);", obj(vec![]));
     if let Value::Object(o) = &r {
         assert_eq!(o.borrow().get("a"), Some(&arr(vec![num(0.0), num(1.0), num(2.0)])));
     }
@@ -1332,7 +1332,7 @@ fn chinese_object_literal_keys() {
 
 #[test]
 fn chinese_keys_sorted_lexicographically() {
-    let (r, _) = run("$.k = keys({中文:1, 中:2, a:3});", obj(vec![]));
+    let (r, _) = run("$.k = Object.keys({中文:1, 中:2, a:3});", obj(vec![]));
     if let Value::Object(o) = &r {
         assert_eq!(o.borrow().get("k"), Some(&arr(vec![s("a"), s("中"), s("中文")])));
     }
@@ -1431,7 +1431,7 @@ fn builtins_can_be_shadowed() {
         "shadowed log must not write output"
     );
 
-    let (_, last) = run("keys = x => x; keys(9)", obj(vec![]));
+    let (_, last) = run("env = x => x; env(9)", obj(vec![]));
     assert_eq!(last, Some(num(9.0)));
 }
 
@@ -1741,8 +1741,8 @@ fn arrow_mutates_root() {
 }
 
 #[test]
-fn arrow_builtin_env_keys_still_work() {
-    let (_, last) = run("keys({ b: 1, a: 2 })", obj(vec![]));
+fn arrow_builtin_object_keys_still_work() {
+    let (_, last) = run("Object.keys({ b: 1, a: 2 })", obj(vec![]));
     assert_eq!(last, Some(arr(vec![s("a"), s("b")])));
 }
 

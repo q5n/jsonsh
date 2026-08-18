@@ -536,7 +536,6 @@ Statements\n\
 Built-ins\n\
   log(value, ...)      print arguments, space-separated\n\
   env(name)            environment variable, or null if unset\n\
-  keys(v)              ordered object keys or array indexes\n\
   parseInt(s[, radix]) parseFloat(s)\n\
   encodeURI / decodeURI / encodeURIComponent / decodeURIComponent\n\
   Math: PI E LN2 LN10 LOG2E LOG10E SQRT2 SQRT1_2; abs floor ceil round trunc\n\
