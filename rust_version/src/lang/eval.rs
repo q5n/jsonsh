@@ -99,6 +99,10 @@ impl<'a> Runtime<'a> {
             .vars
             .borrow_mut()
             .insert("Math".to_string(), super::stdlib::math_object());
+        root_env
+            .vars
+            .borrow_mut()
+            .insert("JSON".to_string(), super::stdlib::json_object());
         Runtime {
             scope: root_env.clone(),
             root: root_env,

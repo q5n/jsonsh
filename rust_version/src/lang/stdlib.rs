@@ -64,6 +64,29 @@ pub fn math_object() -> Value {
     ])
 }
 
+pub fn json_object() -> Value {
+    Value::object_with(vec![
+        ("parse".to_string(), Value::native(json_parse)),
+        ("stringify".to_string(), Value::native(json_stringify)),
+    ])
+}
+
+fn json_parse(args: &[Value]) -> Result<Value, String> {
+    require_args("JSON.parse", args, 1, 1)?;
+    let s = match &args[0] {
+        Value::String(s) => s.clone(),
+        _ => return Err("JSON.parse requires a string argument".to_string()),
+    };
+    let doc = crate::jsonc::parse(s).map_err(|e| e.to_string())?;
+    Ok(doc.root.value.deep_clone())
+}
+
+fn json_stringify(args: &[Value]) -> Result<Value, String> {
+    require_args("JSON.stringify", args, 1, 1)?;
+    let s = crate::jsonc::marshal(&args[0])?;
+    Ok(Value::String(s))
+}
+
 fn unary(name: &'static str, fun: fn(f64) -> f64) -> impl Fn(&[Value]) -> Result<Value, String> {
     move |args: &[Value]| {
         require_args(name, args, 1, 1)?;

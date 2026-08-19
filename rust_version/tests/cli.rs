@@ -484,3 +484,75 @@ fn compact_mode_preserves_chinese_utf8() {
     .unwrap();
     assert_eq!(stdout_str(&out), "{\"中文键\":\"中文值\"}\n");
 }
+
+#[test]
+fn multiple_expressions_concatenate_in_order() {
+    let mut out = Vec::new();
+    run(
+        &["-e", "a = 123", "-e", "a *= 2", "-e", "$.out = a", "-c"],
+        Input::stream(Cursor::new("{}")),
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(stdout_str(&out), "{\"out\":246}\n");
+}
+
+#[test]
+fn multiple_script_files_concatenate_in_order() {
+    let p1 = temp_path("a.js");
+    let p2 = temp_path("b.js");
+    std::fs::write(&p1, "$.a = 1;\n$.b = 2;").unwrap();
+    std::fs::write(&p2, "$.c = $.a + $.b;").unwrap();
+
+    let mut out = Vec::new();
+    run(
+        &["-f", p1.to_str().unwrap(), "-f", p2.to_str().unwrap(), "-c"],
+        Input::stream(Cursor::new("{}")),
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(stdout_str(&out), "{\"a\":1,\"b\":2,\"c\":3}\n");
+
+    let _ = std::fs::remove_file(&p1);
+    let _ = std::fs::remove_file(&p2);
+}
+
+#[test]
+fn mixed_expressions_and_scripts_run_in_command_order() {
+    let p = temp_path("pre.js");
+    std::fs::write(&p, "$.stamp = \"from_file\";").unwrap();
+
+    let mut out = Vec::new();
+    run(
+        &[
+            "-e",
+            "$.first = 1",
+            "-f",
+            p.to_str().unwrap(),
+            "-e",
+            "$.last = 2",
+            "-c",
+        ],
+        Input::stream(Cursor::new("{}")),
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(
+        stdout_str(&out),
+        "{\"first\":1,\"last\":2,\"stamp\":\"from_file\"}\n"
+    );
+
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
+fn missing_script_source_is_an_error() {
+    let mut out = Vec::new();
+    let err = run(
+        &["-c"],
+        Input::stream(Cursor::new("{}")),
+        &mut out,
+    )
+    .unwrap_err();
+    assert_eq!(err, "at least one of -e or -f is required");
+}

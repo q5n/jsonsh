@@ -568,3 +568,109 @@ fn for_loop_increment_and_shift_masking() {
     ]);
     assert_eq!(r, want);
 }
+
+#[test]
+fn json_parse_basic() {
+    let (r, _) = run(
+        r#"
+        $.a = JSON.parse('{"x":1,"y":[true,false,null]}');
+        $.b = JSON.parse('42');
+        $.c = JSON.parse('"hi"');
+        $.d = JSON.parse('null');
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        (
+            "a",
+            obj(vec![
+                ("x", num(1.0)),
+                ("y", arr(vec![Value::Bool(true), Value::Bool(false), Value::Null])),
+            ]),
+        ),
+        ("b", num(42.0)),
+        ("c", s("hi")),
+        ("d", Value::Null),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn json_parse_accepts_jsonc() {
+    let (r, _) = run(
+        r#"
+        $.a = JSON.parse('{ /* comment */ "x": 1, }');
+        $.b = JSON.parse('[1, 2, 3,]');
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("a", obj(vec![("x", num(1.0))])),
+        ("b", arr(vec![num(1.0), num(2.0), num(3.0)])),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn json_parse_invalid_input_errors() {
+    let err = lang::execute("JSON.parse('{x:1}')", obj(vec![]), 10000);
+    assert!(err.is_err());
+
+    let err = lang::execute("JSON.parse(42)", obj(vec![]), 10000);
+    assert!(err.is_err());
+
+    let err = lang::execute("JSON.parse()", obj(vec![]), 10000);
+    assert!(err.is_err());
+}
+
+#[test]
+fn json_stringify_basic() {
+    let (r, _) = run(
+        r#"
+        $.a = JSON.stringify({x: 1, y: [true, false, null]});
+        $.b = JSON.stringify(42);
+        $.c = JSON.stringify("hi");
+        $.d = JSON.stringify(null);
+        $.e = JSON.stringify([1, 2, 3]);
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("a", s("{\"x\":1,\"y\":[true,false,null]}")),
+        ("b", s("42")),
+        ("c", s("\"hi\"")),
+        ("d", s("null")),
+        ("e", s("[1,2,3]")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn json_stringify_functions_become_null() {
+    let (r, _) = run(
+        r#"
+        $.a = JSON.stringify({f: (x) => x * 2, n: 1});
+        $.b = JSON.stringify([(x) => x, 2]);
+        $.c = JSON.stringify((x) => x);
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("a", s("{\"f\":null,\"n\":1}")),
+        ("b", s("[null,2]")),
+        ("c", s("null")),
+    ]);
+    assert_eq!(r, want);
+}
+
+#[test]
+fn json_roundtrip() {
+    let (r, _) = run(
+        r#"
+        $.out = JSON.stringify(JSON.parse('{"a":[1,2,3],"b":"hi"}'));
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![("out", s("{\"a\":[1,2,3],\"b\":\"hi\"}"))]);
+    assert_eq!(r, want);
+}

@@ -30,8 +30,7 @@ impl<R: Read> Input<R> {
 
 #[derive(Default)]
 struct Options {
-    expr: Option<String>,
-    script: Option<String>,
+    sources: Vec<Source>,
     output: Option<String>,
     result: bool,
     compact: bool,
@@ -41,8 +40,11 @@ struct Options {
     show_version: bool,
     syntax_help: bool,
     max_steps: usize,
-    expr_set: bool,
-    script_set: bool,
+}
+
+enum Source {
+    Expr(String),
+    File(String),
 }
 
 pub fn run<R: Read, W: Write>(
@@ -107,15 +109,13 @@ pub fn run<R: Read, W: Write>(
                 i += 1;
             }
             "e" | "expression" => {
-                o.expr_set = true;
                 let (v, consumed) = take_value(inline, &name, &args, i)?;
-                o.expr = Some(v);
+                o.sources.push(Source::Expr(v));
                 i += consumed;
             }
             "f" | "script" => {
-                o.script_set = true;
                 let (v, consumed) = take_value(inline, &name, &args, i)?;
-                o.script = Some(v);
+                o.sources.push(Source::File(v));
                 i += consumed;
             }
             "o" | "output" => {
@@ -146,8 +146,8 @@ pub fn run<R: Read, W: Write>(
         print_language_help(stdout)?;
         return Ok(0);
     }
-    if o.expr_set == o.script_set {
-        return Err("exactly one of -e or -f is required".to_string());
+    if o.sources.is_empty() {
+        return Err("at least one of -e or -f is required".to_string());
     }
     if o.output.is_some() && o.in_place {
         return Err("-o and -i are mutually exclusive".to_string());
@@ -169,11 +169,22 @@ pub fn run<R: Read, W: Write>(
         return Err("--max-steps must be positive".to_string());
     }
 
-    let mut code = o.expr.clone().unwrap_or_default();
-    if let Some(script) = &o.script {
-        if !script.is_empty() {
-            code = fs::read_to_string(script).map_err(|e| format!("read script: {}", e))?;
+    let mut code = String::new();
+    for src in &o.sources {
+        let chunk = match src {
+            Source::Expr(e) => e.clone(),
+            Source::File(path) => {
+                if path.is_empty() {
+                    String::new()
+                } else {
+                    fs::read_to_string(path).map_err(|e| format!("read script: {}", e))?
+                }
+            }
+        };
+        if !code.is_empty() && !code.ends_with('\n') {
+            code.push('\n');
         }
+        code.push_str(&chunk);
     }
 
     let raw: String;
@@ -455,7 +466,7 @@ fn print_usage<W: Write>(w: &mut W) -> Result<(), String> {
         "jsonsh {} - process JSON/JSONC with JavaScript-like expressions\n\
 \n\
 Usage:\n\
-  jsonsh (-e CODE | -f SCRIPT) [options] [INPUT]\n\
+  jsonsh (-e CODE | -f SCRIPT)... [options] [INPUT]\n\
 \n\
 Boolean short options may be grouped. A value-taking option may appear last:\n\
   jsonsh -re \"{{age: 18}}\"\n\
@@ -468,6 +479,8 @@ are replaced, preserving the original formatting and comments.\n\
 Scripts:\n\
   -e, --expression CODE  Execute the specified code\n\
   -f, --script FILE      Read code from a UTF-8 file\n\
+\n\
+Multiple -e/-f options are concatenated in command-line order (with a newline\nbetween each chunk) and executed as one program, like awk -e.\n\
 \n\
 Root variable:\n\
   $                       Current JSON root value\n\
@@ -541,6 +554,8 @@ Built-ins\n\
   Math: PI E LN2 LN10 LOG2E LOG10E SQRT2 SQRT1_2; abs floor ceil round trunc\n\
     sign max min pow sqrt cbrt exp log log2 log10 sin cos tan asin acos atan\n\
     atan2 hypot random\n\
+  JSON: parse(text) parses JSONC (comments, trailing commas accepted);\n\
+    stringify(value) returns compact JSON\n\
   Constructors (with or without new): Object Array String Number Boolean Date.\n\
     Static: Object.keys/values/entries/assign, Array.isArray,\n\
     String.fromCharCode, Number.isInteger/isNaN/isFinite, Date.now/parse/UTC\n\
