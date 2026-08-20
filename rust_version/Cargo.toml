@@ -8,6 +8,12 @@ description = "Process JSON/JSONC with JavaScript-like expressions (Rust port)"
 caseless = "0.2"
 unicode-general-category = "1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Time"] }
+
 [lib]
 name = "jsonsh"
 path = "src/lib.rs"

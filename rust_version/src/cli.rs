@@ -532,7 +532,7 @@ Differences from JavaScript\n\
   only arrow functions: (a, b) => expr, x => expr, (a, b) => {{ ... return ... }}\n\
   only bare names and obj.method() are callable (no IIFE, no f()())\n\
   constructors return plain values, not boxed objects (new String(\"x\") is \"string\")\n\
-  Date is UTC-only (no local timezone); no exceptions, errors carry a position\n\
+  Date uses the host local timezone for non-UTC methods; no exceptions, errors carry a position\n\
 \n\
 Operators (JS precedence, highest to lowest)\n\
   ++ --    ! - + ~ typeof      * / %      + -      << >> >>>\n\
@@ -570,7 +570,8 @@ Methods (numbers are float64, strings are code-point indexed)\n\
   Number: toFixed([digits]) toString([radix]) valueOf\n\
   Object: hasOwnProperty(key); every value has toString() and valueOf()\n\
   Date: getTime getFullYear getMonth getDate getDay getHours getMinutes\n\
-    getSeconds getMilliseconds (plus getUTC* aliases) toISOString valueOf\n\
+    getSeconds getMilliseconds getTimezoneOffset (getUTC* variants are UTC)\n\
+    toISOString (UTC) toString (local ±HH:mm) valueOf\n\
   RegExp: test(str) exec(str); read-only source flags global ignoreCase\n\
     multiline\n\
 ",

@@ -40,6 +40,27 @@ Dependency direction is one-way: `lang` → `jsonc` → `value`. No cycles. Func
 
 - Table-driven tests in `tests/{jsonc,lang,cli}.rs`. `cli.rs` calls `run(args, Input, stdout)` directly (no subprocess); `lang.rs` uses a `run(code, root)` helper and `execute`/`execute_with_output`.
 
+### Testing the Linux (Unix) code path via WSL
+
+The Windows host compiles the `cfg(windows)` branch of `src/tz.rs`; the `cfg(unix)` branch (`libc::localtime_r`/`mktime`) must be verified on Linux. Use `wsl bash -ic '...'` (interactive bash loads `~/.bashrc` so the Rust toolchain in `~/.cargo/bin` and any proxy env are on PATH). One-time setup in WSL: `rustup default stable` (minimal profile is enough) and `gcc`/`cc` for linking.
+
+```bash
+# Copy the repo into the WSL native filesystem (never build on /mnt/d — slow + locks)
+wsl bash -ic 'rm -rf ~/jsonsh-lin && cp -r /mnt/d/GithubProjects/jsonsh ~/jsonsh-lin && rm -rf ~/jsonsh-lin/target ~/jsonsh-lin/rust_version/target'
+
+# Full suite under a specific timezone
+wsl bash -ic 'cd ~/jsonsh-lin/rust_version && TZ=America/New_York cargo test'
+
+# Sweep across timezones (write the loop in a script file; $TZ gets mangled through
+# PowerShell→WSL quoting, so don't inline the for-loop in the -c string):
+#   for tz in UTC Asia/Shanghai Asia/Kolkata Australia/Sydney Europe/London \
+#            America/New_York America/Los_Angeles Pacific/Honolulu; do
+#     TZ="$tz" cargo test date
+#   done
+```
+
+Timezone-sensitive assertions must NOT hardcode wall-clock values — derive them from `getTimezoneOffset()` / a `toString()` round-trip so the suite passes in every TZ and under DST. The Date tests are designed this way; re-run the sweep after touching `src/date.rs`, `src/tz.rs`, `src/lang/stdlib.rs` (Date constructor), or `src/lang/eval.rs` (Date methods). Clean up with `wsl bash -ic 'rm -rf ~/jsonsh-lin'`.
+
 ## Releases
 
 `release.sh` (Bash) computes the next semver from `+001`/`+010`/`+100`, bumps `rust_version/Cargo.toml`'s `version` field (and syncs `Cargo.lock`), commits, tags `vX.Y.Z`, pushes, and prunes old tags. The binary version comes from `env!("CARGO_PKG_VERSION")` (the Cargo.toml `version`). CI (`.github/workflows/release.yml`) triggers on `v*` tags and builds `cargo build --release` for Windows + Linux x64.

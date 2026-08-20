@@ -986,18 +986,31 @@ impl<'a> Runtime<'a> {
         if !args.is_empty() {
             return Err(self.fail(p, &format!("{} expects no arguments", name)));
         }
-        let parts = crate::date::date_parts(ms);
+        let local = crate::date::local_parts(ms);
+        let utc = crate::date::utc_parts(ms);
         match name {
             "valueOf" | "getTime" => Ok(Value::Number(ms)),
-            "getFullYear" | "getUTCFullYear" => Ok(Value::Number(parts.year as f64)),
-            "getMonth" | "getUTCMonth" => Ok(Value::Number((parts.month - 1) as f64)),
-            "getDate" | "getUTCDate" => Ok(Value::Number(parts.day as f64)),
-            "getDay" | "getUTCDay" => Ok(Value::Number(parts.weekday as f64)),
-            "getHours" | "getUTCHours" => Ok(Value::Number(parts.hours as f64)),
-            "getMinutes" | "getUTCMinutes" => Ok(Value::Number(parts.minutes as f64)),
-            "getSeconds" | "getUTCSeconds" => Ok(Value::Number(parts.seconds as f64)),
-            "getMilliseconds" | "getUTCMilliseconds" => Ok(Value::Number(parts.millis as f64)),
-            "toISOString" | "toString" => Ok(Value::String(crate::date::to_iso_string(ms))),
+            "getFullYear" => Ok(Value::Number(local.year as f64)),
+            "getUTCFullYear" => Ok(Value::Number(utc.year as f64)),
+            "getMonth" => Ok(Value::Number((local.month - 1) as f64)),
+            "getUTCMonth" => Ok(Value::Number((utc.month - 1) as f64)),
+            "getDate" => Ok(Value::Number(local.day as f64)),
+            "getUTCDate" => Ok(Value::Number(utc.day as f64)),
+            "getDay" => Ok(Value::Number(local.weekday as f64)),
+            "getUTCDay" => Ok(Value::Number(utc.weekday as f64)),
+            "getHours" => Ok(Value::Number(local.hours as f64)),
+            "getUTCHours" => Ok(Value::Number(utc.hours as f64)),
+            "getMinutes" => Ok(Value::Number(local.minutes as f64)),
+            "getUTCMinutes" => Ok(Value::Number(utc.minutes as f64)),
+            "getSeconds" => Ok(Value::Number(local.seconds as f64)),
+            "getUTCSeconds" => Ok(Value::Number(utc.seconds as f64)),
+            "getMilliseconds" => Ok(Value::Number(local.millis as f64)),
+            "getUTCMilliseconds" => Ok(Value::Number(utc.millis as f64)),
+            "getTimezoneOffset" => {
+                Ok(Value::Number(-(crate::tz::offset_ms(ms) / 60_000) as f64))
+            }
+            "toISOString" => Ok(Value::String(crate::date::to_iso_string(ms))),
+            "toString" => Ok(Value::String(crate::date::to_local_iso_string(ms))),
             _ => Err(self.fail(p, &format!("unknown method {:?}", name))),
         }
     }
@@ -1926,7 +1939,7 @@ fn value_string(v: &Value) -> String {
         }
         Value::Function(_) | Value::Builtin(_) | Value::Constructor(_) => "[Function]".to_string(),
         Value::Regex(re) => format!("/{}/{}", re.source(), re.flags()),
-        Value::Date(ms) => crate::date::to_iso_string(*ms),
+        Value::Date(ms) => crate::date::to_local_iso_string(*ms),
         Value::Object(_) => match jsonc::marshal(v) {
             Ok(s) => s,
             Err(_) => format!("{:?}", v),

@@ -263,9 +263,12 @@ fn date_edge_cases() {
         $.rolloverMonth = new Date(2019, 1, 29).getMonth();
         $.leap = new Date(2020, 1, 29).getDate();
         $.negTime = new Date(-1).getTime();
-        $.negDate = new Date(-86400000).getDate();
+        $.negDate = new Date(-86400000).getUTCDate();
         $.daySunday = new Date(2024, 0, 7).getDay();
-        $.dateOnly = Date.parse("2020-01-02");
+        $.dateOnlyYear = new Date(Date.parse("2020-01-02")).getFullYear();
+        $.dateOnlyMonth = new Date(Date.parse("2020-01-02")).getMonth();
+        $.dateOnlyDay = new Date(Date.parse("2020-01-02")).getDate();
+        $.dateOnlyHours = new Date(Date.parse("2020-01-02")).getHours();
     "#,
         obj(vec![]),
     );
@@ -276,7 +279,10 @@ fn date_edge_cases() {
         ("negTime", num(-1.0)),
         ("negDate", num(31.0)),
         ("daySunday", num(0.0)),
-        ("dateOnly", num(1577923200000.0)),
+        ("dateOnlyYear", num(2020.0)),
+        ("dateOnlyMonth", num(0.0)),
+        ("dateOnlyDay", num(2.0)),
+        ("dateOnlyHours", num(0.0)),
     ]);
     assert_eq!(r, want);
 }

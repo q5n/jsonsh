@@ -16,7 +16,7 @@ pub fn now_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
-pub fn date_parts(ms: f64) -> DateParts {
+pub fn utc_parts(ms: f64) -> DateParts {
     if ms.is_nan() || ms.is_infinite() {
         return DateParts {
             year: 0,
@@ -49,14 +49,40 @@ pub fn date_parts(ms: f64) -> DateParts {
     }
 }
 
+/// Calendar components of `ms` in the current local timezone (DST-aware).
+pub fn local_parts(ms: f64) -> DateParts {
+    if ms.is_nan() || ms.is_infinite() {
+        return utc_parts(ms);
+    }
+    utc_parts(ms + crate::tz::offset_ms(ms) as f64)
+}
+
 pub fn to_iso_string(ms: f64) -> String {
     if ms.is_nan() {
         return "Invalid Date".to_string();
     }
-    let p = date_parts(ms);
+    let p = utc_parts(ms);
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
         p.year, p.month, p.day, p.hours, p.minutes, p.seconds, p.millis
+    )
+}
+
+/// Local ISO-8601 rendering: local wall-clock components followed by the
+/// local offset (`±HH:mm`), e.g. `2026-08-20T20:00:00.123+08:00`.
+pub fn to_local_iso_string(ms: f64) -> String {
+    if ms.is_nan() {
+        return "Invalid Date".to_string();
+    }
+    let p = utc_parts(ms + crate::tz::offset_ms(ms) as f64);
+    let off = crate::tz::offset_ms(ms) / 1000;
+    let sign = if off < 0 { '-' } else { '+' };
+    let abs = off.abs();
+    let oh = abs / 3600;
+    let om = (abs % 3600) / 60;
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}{}{:02}:{:02}",
+        p.year, p.month, p.day, p.hours, p.minutes, p.seconds, p.millis, sign, oh, om
     )
 }
 
@@ -73,8 +99,16 @@ pub fn make_date_ms(
     (days * 86_400_000 + hours * 3_600_000 + minutes * 60_000 + seconds * 1_000 + millis) as f64
 }
 
-/// Parse a strict UTC ISO-8601 timestamp (with optional milliseconds and a
-/// trailing `Z`). Unparseable input yields `None`.
+/// Parse an ISO-8601 timestamp.
+///
+/// Accepted forms:
+/// * `YYYY-MM-DD`
+/// * `YYYY-MM-DD[T| ]HH:MM:SS[.fff]`
+///
+/// A trailing timezone may be `Z`/`z` (UTC), an explicit offset
+/// (`±HH:mm`, `±HHmm`, or `±HH`), or absent. When absent the wall-clock
+/// components are interpreted in the current local timezone; when present
+/// they are shifted to UTC by that offset. Unparseable input yields `None`.
 pub fn parse_iso_date(s: &str) -> Option<f64> {
     let s = s.trim();
     let b = s.as_bytes();
@@ -88,6 +122,7 @@ pub fn parse_iso_date(s: &str) -> Option<f64> {
     let mut minutes = 0i64;
     let mut seconds = 0i64;
     let mut millis = 0i64;
+    let mut offset_minutes: Option<i64> = None;
     if b.len() > 10 {
         if b.len() < 19 || (b[10] != b'T' && b[10] != b' ') || b[13] != b':' || b[16] != b':' {
             return None;
@@ -112,13 +147,58 @@ pub fn parse_iso_date(s: &str) -> Option<f64> {
             millis = frac[..3].parse().ok()?;
         }
         if i < b.len() {
-            let tz = &s[i..];
-            if tz != "Z" && tz != "z" {
-                return None;
-            }
+            offset_minutes = Some(parse_tz_offset(&s[i..])?);
         }
     }
-    Some(make_date_ms(year, month - 1, day, hours, minutes, seconds, millis))
+    let naive = make_date_ms(year, month - 1, day, hours, minutes, seconds, millis);
+    match offset_minutes {
+        // Explicit offset: wall clock is at that offset, shift back to UTC.
+        Some(m) => Some(naive - (m * 60_000) as f64),
+        // No offset: interpret as local time.
+        None => {
+            let utc = crate::tz::local_to_utc_ms(
+                year,
+                month - 1,
+                day,
+                hours,
+                minutes,
+                seconds,
+                millis,
+            )
+            .unwrap_or(naive as i64);
+            Some(utc as f64)
+        }
+    }
+}
+
+/// Parse a trailing timezone designator into signed offset minutes (east
+/// positive). Returns `None` on malformed input.
+fn parse_tz_offset(tz: &str) -> Option<i64> {
+    if tz == "Z" || tz == "z" {
+        return Some(0);
+    }
+    let b = tz.as_bytes();
+    if b.len() < 3 || (b[0] != b'+' && b[0] != b'-') {
+        return None;
+    }
+    let sign: i64 = if b[0] == b'+' { 1 } else { -1 };
+    let digits: Vec<u8> = b[1..].iter().filter(|&&c| c != b':').cloned().collect();
+    if digits.len() != 2 && digits.len() != 4 {
+        return None;
+    }
+    if !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let hh: i64 = std::str::from_utf8(&digits[..2]).ok()?.parse().ok()?;
+    let mm: i64 = if digits.len() == 4 {
+        std::str::from_utf8(&digits[2..4]).ok()?.parse().ok()?
+    } else {
+        0
+    };
+    if hh > 23 || mm > 59 {
+        return None;
+    }
+    Some(sign * (hh * 60 + mm))
 }
 
 /// Howard Hinnant's `days_from_civil` algorithm (public domain): days since

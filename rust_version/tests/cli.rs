@@ -269,6 +269,7 @@ fn language_help() {
         "toFixed([digits])",
         "hasOwnProperty(key)",
         "getFullYear",
+        "getTimezoneOffset",
         "RegExp(pattern[, flags])",
         "test(str)",
         "exec(str)",

@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::date;
+use crate::tz;
 use crate::value::{Constructor, Value};
 
 pub fn global_functions() -> Vec<(&'static str, Value)> {
@@ -378,7 +379,7 @@ fn date_ctor(args: &[Value]) -> Result<Value, String> {
         [Value::Null] => Ok(Value::date(0.0)),
         _ => {
             let nums: Vec<f64> = args.iter().map(|a| to_number(Some(a))).collect();
-            let ms = date::make_date_ms(
+            let utc_ms = tz::local_to_utc_ms(
                 nums[0].trunc() as i64,
                 nums.get(1).map_or(0.0, |n| n.trunc()) as i64,
                 nums.get(2).map_or(1.0, |n| n.trunc()) as i64,
@@ -386,8 +387,19 @@ fn date_ctor(args: &[Value]) -> Result<Value, String> {
                 nums.get(4).map_or(0.0, |n| n.trunc()) as i64,
                 nums.get(5).map_or(0.0, |n| n.trunc()) as i64,
                 nums.get(6).map_or(0.0, |n| n.trunc()) as i64,
-            );
-            Ok(Value::date(ms))
+            )
+            .unwrap_or_else(|| {
+                date::make_date_ms(
+                    nums[0].trunc() as i64,
+                    nums.get(1).map_or(0.0, |n| n.trunc()) as i64,
+                    nums.get(2).map_or(1.0, |n| n.trunc()) as i64,
+                    nums.get(3).map_or(0.0, |n| n.trunc()) as i64,
+                    nums.get(4).map_or(0.0, |n| n.trunc()) as i64,
+                    nums.get(5).map_or(0.0, |n| n.trunc()) as i64,
+                    nums.get(6).map_or(0.0, |n| n.trunc()) as i64,
+                ) as i64
+            });
+            Ok(Value::date(utc_ms as f64))
         }
     }
 }

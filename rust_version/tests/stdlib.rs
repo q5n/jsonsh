@@ -21,6 +21,26 @@ fn run(code: &str, root: Value) -> (Value, Option<Value>) {
     lang::execute(code, root, 10000).unwrap()
 }
 
+fn get_num(v: &Value, key: &str) -> f64 {
+    match v {
+        Value::Object(o) => match o.borrow().get(key) {
+            Some(Value::Number(n)) => *n,
+            _ => panic!("missing number key {}", key),
+        },
+        _ => panic!("not an object"),
+    }
+}
+
+fn get_str(v: &Value, key: &str) -> String {
+    match v {
+        Value::Object(o) => match o.borrow().get(key) {
+            Some(Value::String(s)) => s.clone(),
+            _ => panic!("missing string key {}", key),
+        },
+        _ => panic!("not an object"),
+    }
+}
+
 #[test]
 fn global_parse_int() {
     let (r, _) = run(
@@ -266,11 +286,11 @@ fn date_constructor_and_methods() {
         r#"
         $.ms = new Date(0).getTime();
         $.iso = new Date(0).toISOString();
-        $.year = new Date(0).getFullYear();
-        $.month = new Date(0).getMonth();
-        $.date = new Date(0).getDate();
-        $.day = new Date(0).getDay();
-        $.hours = new Date(0).getHours();
+        $.year = new Date(0).getUTCFullYear();
+        $.month = new Date(0).getUTCMonth();
+        $.date = new Date(0).getUTCDate();
+        $.day = new Date(0).getUTCDay();
+        $.hours = new Date(0).getUTCHours();
         $.parsed = Date.parse("1970-01-01T00:00:00.000Z");
         $.utc = Date.UTC(1970, 0, 1);
         $.constructed = new Date(2020, 0, 2).getDate();
@@ -280,9 +300,17 @@ fn date_constructor_and_methods() {
         $.nowNum = typeof Date.now();
         $.type = typeof new Date(0);
         $.json = {d: new Date(0)}.toString();
+        $.tzOffset = new Date(0).getTimezoneOffset();
+        $.localHours = new Date(0).getHours();
+        $.localIso = new Date(0).toString();
+        $.utcFromIso = new Date(0).toISOString();
+        $.roundTrip = new Date($.localIso).getTime();
     "#,
         obj(vec![]),
     );
+    let tz_offset = get_num(&r, "tzOffset");
+    let local_hours = get_num(&r, "localHours");
+    let local_iso = get_str(&r, "localIso").to_string();
     let want = obj(vec![
         ("ms", num(0.0)),
         ("iso", s("1970-01-01T00:00:00.000Z")),
@@ -300,6 +328,154 @@ fn date_constructor_and_methods() {
         ("nowNum", s("number")),
         ("type", s("object")),
         ("json", s("{\"d\":\"1970-01-01T00:00:00.000Z\"}")),
+        ("tzOffset", num(tz_offset)),
+        ("localHours", num(local_hours)),
+        ("localIso", s(&local_iso)),
+        ("utcFromIso", s("1970-01-01T00:00:00.000Z")),
+        ("roundTrip", num(0.0)),
+    ]);
+    assert_eq!(r, want);
+    // local time = UTC - offset (in minutes); the floor gives the hour
+    let total_local_min = 0 - tz_offset as i64;
+    let expected_hour = total_local_min.rem_euclid(24 * 60) / 60;
+    assert_eq!(local_hours as i64, expected_hour);
+    // toString carries a ±HH:mm suffix matching getTimezoneOffset
+    assert!(local_iso.len() >= 6);
+    let off_suffix = &local_iso[23..];
+    assert!(off_suffix.starts_with('+') || off_suffix.starts_with('-'));
+    assert_eq!(off_suffix.len(), 6);
+    assert_eq!(off_suffix.as_bytes()[3], b':');
+    let expected_suffix = {
+        let sign = if tz_offset <= 0.0 { '+' } else { '-' };
+        let mins = tz_offset.abs() as i64;
+        format!("{}{:02}:{:02}", sign, mins / 60, mins % 60)
+    };
+    assert_eq!(off_suffix, expected_suffix);
+}
+
+#[test]
+fn date_timezone_offsets_and_local_parse() {
+    // Explicit offset parsing: 20:00 +08:00 == 12:00 UTC, independent of host TZ.
+    let (r, _) = run(
+        r#"
+        $.fromOffset = Date.parse("2026-08-20T20:00:00.123+08:00");
+        $.expectedUtc = Date.UTC(2026, 7, 20, 12, 0, 0, 123);
+        $.uYear = new Date($.fromOffset).getUTCFullYear();
+        $.uMonth = new Date($.fromOffset).getUTCMonth();
+        $.uDate = new Date($.fromOffset).getUTCDate();
+        $.uHours = new Date($.fromOffset).getUTCHours();
+        $.uMin = new Date($.fromOffset).getUTCMinutes();
+        $.uMs = new Date($.fromOffset).getUTCMilliseconds();
+        $.ctorOffset = new Date("2026-08-20T20:00:00.123+08:00").getTime();
+        $.compactOffset = Date.parse("2026-08-20T20:00:00+0800");
+        $.negative = Date.parse("2026-01-01T00:00:00-05:00");
+        $.negExpected = Date.UTC(2026, 0, 1, 5, 0, 0, 0);
+        $.zulu = Date.parse("2026-08-20T20:00:00.123Z");
+        $.zuluExpected = Date.UTC(2026, 7, 20, 20, 0, 0, 123);
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("fromOffset", num(get_num(&r, "expectedUtc"))),
+        ("expectedUtc", num(get_num(&r, "expectedUtc"))),
+        ("uYear", num(2026.0)),
+        ("uMonth", num(7.0)),
+        ("uDate", num(20.0)),
+        ("uHours", num(12.0)),
+        ("uMin", num(0.0)),
+        ("uMs", num(123.0)),
+        ("ctorOffset", num(get_num(&r, "expectedUtc"))),
+        ("compactOffset", num(get_num(&r, "expectedUtc") - 123.0)),
+        ("negative", num(get_num(&r, "negExpected"))),
+        ("negExpected", num(get_num(&r, "negExpected"))),
+        ("zulu", num(get_num(&r, "zuluExpected"))),
+        ("zuluExpected", num(get_num(&r, "zuluExpected"))),
+    ]);
+    assert_eq!(r, want);
+    // zulu is 8 hours ahead of the +08:00 instant (20:00Z vs 12:00Z)
+    assert_eq!(
+        get_num(&r, "zuluExpected") - get_num(&r, "expectedUtc"),
+        8.0 * 3_600_000.0
+    );
+
+    // No offset => local time. Round-trips through local getters.
+    let (r, _) = run(
+        r#"
+        $.d = new Date("2026-08-20T20:00:00.500");
+        $.ly = $.d.getFullYear();
+        $.lm = $.d.getMonth();
+        $.ld = $.d.getDate();
+        $.lh = $.d.getHours();
+        $.lmin = $.d.getMinutes();
+        $.lsec = $.d.getSeconds();
+        $.lms = $.d.getMilliseconds();
+        $.ms = $.d.getTime();
+        $.iso = $.d.toISOString();
+        $.dateOnlyY = new Date(Date.parse("2020-01-02")).getFullYear();
+        $.dateOnlyM = new Date(Date.parse("2020-01-02")).getMonth();
+        $.dateOnlyD = new Date(Date.parse("2020-01-02")).getDate();
+        $.dateOnlyH = new Date(Date.parse("2020-01-02")).getHours();
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("d", Value::Date(get_num(&r, "ms"))),
+        ("ly", num(2026.0)),
+        ("lm", num(7.0)),
+        ("ld", num(20.0)),
+        ("lh", num(20.0)),
+        ("lmin", num(0.0)),
+        ("lsec", num(0.0)),
+        ("lms", num(500.0)),
+        ("ms", num(get_num(&r, "ms"))),
+        ("iso", s(&get_str(&r, "iso"))),
+        ("dateOnlyY", num(2020.0)),
+        ("dateOnlyM", num(0.0)),
+        ("dateOnlyD", num(2.0)),
+        ("dateOnlyH", num(0.0)),
+    ]);
+    assert_eq!(r, want);
+    assert!(get_str(&r, "iso").ends_with('Z'));
+
+    // Multi-arg constructor uses local time; local getters round-trip.
+    let (r, _) = run(
+        r#"
+        $.d = new Date(2026, 7, 20, 20, 0, 0, 500);
+        $.ly = $.d.getFullYear();
+        $.lm = $.d.getMonth();
+        $.ld = $.d.getDate();
+        $.lh = $.d.getHours();
+        $.lmin = $.d.getMinutes();
+        $.lms = $.d.getMilliseconds();
+        $.ms = $.d.getTime();
+        $.uY = $.d.getUTCFullYear();
+        $.uM = $.d.getUTCMonth();
+        $.uD = $.d.getUTCDate();
+        $.uH = $.d.getUTCHours();
+        $.uMi = $.d.getUTCMinutes();
+        $.uS = $.d.getUTCSeconds();
+        $.uMs = $.d.getUTCMilliseconds();
+        $.rebuilt = Date.UTC($.uY, $.uM, $.uD, $.uH, $.uMi, $.uS, $.uMs);
+    "#,
+        obj(vec![]),
+    );
+    let want = obj(vec![
+        ("d", Value::Date(get_num(&r, "ms"))),
+        ("ly", num(2026.0)),
+        ("lm", num(7.0)),
+        ("ld", num(20.0)),
+        ("lh", num(20.0)),
+        ("lmin", num(0.0)),
+        ("lms", num(500.0)),
+        ("ms", num(get_num(&r, "ms"))),
+        ("uY", num(get_num(&r, "uY"))),
+        ("uM", num(get_num(&r, "uM"))),
+        ("uD", num(get_num(&r, "uD"))),
+        ("uH", num(get_num(&r, "uH"))),
+        ("uMi", num(get_num(&r, "uMi"))),
+        ("uS", num(get_num(&r, "uS"))),
+        ("uMs", num(get_num(&r, "uMs"))),
+        ("rebuilt", num(get_num(&r, "ms"))),
     ]);
     assert_eq!(r, want);
 }
