@@ -327,7 +327,7 @@ fn date_constructor_and_methods() {
         ("nowPositive", Value::Bool(true)),
         ("nowNum", s("number")),
         ("type", s("object")),
-        ("json", s("{\"d\":\"1970-01-01T00:00:00.000Z\"}")),
+        ("json", s(&format!("{{\"d\":\"{}\"}}", local_iso))),
         ("tzOffset", num(tz_offset)),
         ("localHours", num(local_hours)),
         ("localIso", s(&local_iso)),

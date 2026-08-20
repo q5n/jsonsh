@@ -50,7 +50,7 @@ fn append_json(dst: &mut String, v: &Value) -> Result<(), String> {
             if ms.is_nan() {
                 dst.push_str("null");
             } else {
-                append_json_string(dst, &crate::date::to_iso_string(*ms));
+                append_json_string(dst, &crate::date::to_local_iso_string(*ms));
             }
         }
     }
