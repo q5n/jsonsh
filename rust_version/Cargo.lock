@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "jsonsh"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "caseless",
  "libc",

@@ -21,12 +21,15 @@ jobs:
         include:
           - name: Windows x64
             os: windows-latest
-            output: target/release/jsonsh.exe
+            target: x86_64-pc-windows-msvc
+            output: target/x86_64-pc-windows-msvc/release/jsonsh.exe
             archive: jsonsh-windows-x64.zip
             artifact: jsonsh-windows-x64
+            rustflags: "-C target-feature=+crt-static"
           - name: Linux x64
             os: ubuntu-latest
-            output: target/release/jsonsh
+            target: x86_64-unknown-linux-musl
+            output: target/x86_64-unknown-linux-musl/release/jsonsh
             archive: jsonsh-linux-x64.zip
             artifact: jsonsh-linux-x64
 
@@ -34,14 +37,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Install musl tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Run tests
-        run: cargo test
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo test --target ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --target ${{ matrix.target }} --frozen
 
       - name: Package Windows x64
         if: matrix.os == 'windows-latest'
